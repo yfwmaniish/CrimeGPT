@@ -1,0 +1,19 @@
+# --- Core ---
+Django==5.1.4
+djangorestframework==3.15.2
+psycopg2-binary==2.9.10
+
+# --- Audit / history ---
+django-simple-history==3.7.0
+
+# --- Vector store (extension enabled now, VectorField used in Week 2) ---
+pgvector==0.3.6
+
+# --- Frontend integration ---
+django-cors-headers==4.6.0
+
+# --- Config ---
+python-dotenv==1.0.1
+
+# --- Documents (used from Day 3 onward) ---
+docxtpl==0.18.0

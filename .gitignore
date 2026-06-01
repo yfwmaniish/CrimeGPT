@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Django
+*.log
+*.sqlite3
+/backend/media/
+/backend/staticfiles/
+/backend/static_collected/
+
+# Environment
+.env
+*.env
+!.env.example
+
+# Node / Vite
+node_modules/
+/frontend/dist/
+/frontend/.vite/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docker
+*.pid
