@@ -1,4 +1,5 @@
-"""Tests for the Case API (Day 2) and the legal-section loader (Day 3).
+"""Tests for the Case API (Day 2), the legal-section loader (Day 3), and the
+Seizure Receipt generation endpoint (Day 4).
 
 Run: docker compose exec web python manage.py test core
 """
@@ -7,12 +8,14 @@ from pathlib import Path
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Case, LegalSection, User
+from .models import Case, DiaryEvent, Document, LegalSection, Party, SeizedItem, User
+
+_TEST_MEDIA = tempfile.mkdtemp(prefix="crimegpt-media-")
 
 
 class NestedCaseAPITests(APITestCase):
@@ -289,3 +292,95 @@ class SeizureReceiptTemplateTests(TestCase):
         # No unrendered Jinja tags left behind
         self.assertNotIn("{{", text)
         self.assertNotIn("{%", text)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class SeizureGenerationAPITests(APITestCase):
+    """Day 4: POST /api/cases/{id}/documents/seizure/."""
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io1", password="pw", role="IO", police_station="PS-Central")
+        self.sho = User.objects.create_user(username="sho1", password="pw", role="SHO", police_station="PS-Central")
+        self.legal = User.objects.create_user(username="legal1", password="pw", role="LEGAL")
+
+        self.case = Case.objects.create(
+            case_number="C-900", fir_number="FIR-900", fir_date="2026-06-01",
+            police_station="PS-Central", status="INVESTIGATION",
+            incident_place="Market Road", io=self.io,
+        )
+        self.accused = Party.objects.create(case=self.case, role="ACCUSED", name="Ravi", parent_name="Mohan")
+        Party.objects.create(case=self.case, role="WITNESS", name="Sunil", address="5 Nehru Rd")
+        SeizedItem.objects.create(
+            case=self.case, description="One mobile phone", quantity="1",
+            seized_from=self.accused, seizure_place="Market Road",
+        )
+        self.url = reverse("case-generate-seizure", args=[self.case.id])
+
+    def test_io_can_generate_receipt(self):
+        self.client.force_authenticate(self.io)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertEqual(resp.data["version"], 1)
+        self.assertTrue(resp.data["download_url"].endswith(".docx"))
+
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="SEIZURE").count(), 1)
+        doc = Document.objects.get(case=self.case, doc_type="SEIZURE")
+        self.assertTrue(doc.file.name)
+
+        # The rendered file actually contains the case data.
+        from docx import Document as Docx
+
+        doc.file.open("rb")
+        try:
+            rendered = Docx(doc.file)
+        finally:
+            doc.file.close()
+        text = "\n".join(p.text for p in rendered.paragraphs)
+        for table in rendered.tables:
+            for row in table.rows:
+                text += "\n" + " | ".join(c.text for c in row.cells)
+        self.assertIn("C-900", text)
+        self.assertIn("Ravi", text)
+        self.assertIn("One mobile phone", text)
+
+    def test_sho_can_generate_receipt(self):
+        self.client.force_authenticate(self.sho)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+
+    def test_regeneration_increments_version(self):
+        self.client.force_authenticate(self.io)
+        first = self.client.post(self.url)
+        second = self.client.post(self.url)
+        self.assertEqual(first.data["version"], 1)
+        self.assertEqual(second.data["version"], 2)
+        # Old version is kept, not overwritten.
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="SEIZURE").count(), 2)
+        self.assertEqual(
+            sorted(Document.objects.filter(case=self.case).values_list("version", flat=True)),
+            [1, 2],
+        )
+
+    def test_diary_event_is_logged(self):
+        self.client.force_authenticate(self.io)
+        self.assertEqual(self.case.diary.count(), 0)
+        self.client.post(self.url)
+
+        events = self.case.diary.filter(event_type="DOCUMENT_GENERATED")
+        self.assertEqual(events.count(), 1)
+        event = events.get()
+        self.assertEqual(event.actor, self.io)
+        self.assertIn("Seizure Receipt", event.description)
+
+    def test_legal_advisor_is_forbidden(self):
+        self.client.force_authenticate(self.legal)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        # Nothing was generated or logged.
+        self.assertEqual(Document.objects.filter(case=self.case).count(), 0)
+        self.assertEqual(self.case.diary.count(), 0)
+
+    def test_unauthenticated_is_rejected(self):
+        resp = self.client.post(self.url)
+        self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+        self.assertEqual(Document.objects.filter(case=self.case).count(), 0)

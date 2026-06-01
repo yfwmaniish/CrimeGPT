@@ -86,6 +86,26 @@ POST /api/cases/
 key leaves it untouched. See [backend/core/serializers.py](backend/core/serializers.py)
 for the full contract.
 
+### Generate a Seizure Receipt (Day 4)
+
+```
+POST /api/cases/{id}/documents/seizure/
+```
+
+Renders the Seizure Receipt from the case (its accused party, seized items, and
+the case's IO as seizing officer), saves a `Document`, logs a `DiaryEvent`, and
+returns a download URL:
+
+```json
+{ "id": 5, "doc_type": "SEIZURE", "version": 1,
+  "download_url": "http://localhost:8000/media/documents/seizure_receipt_case3_v1.docx",
+  "generated_at": "2026-06-02T..." }
+```
+
+- **Roles:** only **IO** and **SHO** may generate (others get `403`).
+- **Versioning:** regenerating never overwrites — it creates a new `Document`
+  with `version` incremented (v1, v2, ...), keeping the full history.
+
 Run the API tests:
 
 ```sh
@@ -165,5 +185,13 @@ docker compose down -v         # stop + wipe the database volume
 - [x] Seizure Receipt `docxtpl` template (generated from code) + renderer
 - [x] 11 tests passing (5 API + 5 loader + 1 template render)
 
-**Next (Day 4):** `POST /api/cases/{id}/documents/seizure/` — fill the template
-from real Case data, save a `Document`, return a download URL.
+**Day 4 — complete**
+- [x] `POST /api/cases/{id}/documents/seizure/` renders from real Case data
+- [x] Saves a `Document`; regeneration increments `version` (no overwrite)
+- [x] Logs a `DiaryEvent` (DOCUMENT_GENERATED) with the acting user
+- [x] Restricted to IO/SHO roles; returns a download URL
+- [x] 17 tests passing (adds 6: success, SHO allowed, version bump, diary,
+      role-forbidden, unauthenticated)
+
+**Next (Day 5):** minimal React flow — create a case, add parties + seized
+items, click "Generate Seizure Receipt", download the file.

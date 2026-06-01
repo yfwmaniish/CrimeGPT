@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 
 from django.conf import settings
+from django.utils import timezone
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt
@@ -111,6 +112,57 @@ def render_seizure_receipt(context: dict, template_path: Path = SEIZURE_TEMPLATE
     tpl = DocxTemplate(str(template_path))
     tpl.render(context)
     return tpl
+
+
+def build_seizure_context_from_case(case) -> dict:
+    """Map a Case (+ accused Party, SeizedItems, seizing officer) to the template
+    context. The seizing officer is the case's IO; the first ACCUSED party is the
+    person the items were seized from on the receipt. Missing pieces render blank.
+    """
+
+    def fmt_date(d):
+        return d.strftime("%d-%m-%Y") if d else ""
+
+    accused = case.parties.filter(role="ACCUSED").first()
+    officer = case.io
+
+    items = [
+        {
+            "sno": i,
+            "description": item.description,
+            "quantity": item.quantity,
+            "seized_from": item.seized_from.name if item.seized_from else "",
+            "seizure_date": fmt_date(item.seizure_date),
+            "seizure_place": item.seizure_place,
+        }
+        for i, item in enumerate(case.seized_items.all(), start=1)
+    ]
+    witnesses = [
+        {"name": w.name, "address": w.address}
+        for w in case.parties.filter(role="WITNESS")
+    ]
+
+    return {
+        "today": timezone.localdate().strftime("%d-%m-%Y"),
+        "case": {
+            "case_number": case.case_number,
+            "fir_number": case.fir_number,
+            "police_station": case.police_station,
+            "incident_place": case.incident_place,
+        },
+        "officer": {
+            "name": (officer.get_full_name() or officer.username) if officer else "",
+            "role": officer.get_role_display() if (officer and officer.role) else "",
+            "police_station": officer.police_station if officer else "",
+        },
+        "accused": {
+            "name": accused.name if accused else "",
+            "parent_name": accused.parent_name if accused else "",
+            "address": accused.address if accused else "",
+        },
+        "seized_items": items,
+        "witnesses": witnesses,
+    }
 
 
 def sample_seizure_context() -> dict:
