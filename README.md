@@ -92,13 +92,51 @@ Run the API tests:
 docker compose exec web python manage.py test core
 ```
 
+## Legal data — BNS sections (Day 3)
+
+Reference data for the `LegalSection` model. Two official sources are combined:
+section text from **India Code** (indiacode.nic.in, Act 45 of 2023) and the
+IPC-equivalent from the **NCRB** corresponding-section table.
+
+```sh
+# Scrape all 358 BNS sections (+ IPC equivalents) into a CSV:
+docker compose exec web python manage.py scrape_bns --out data/bns_sections.csv
+# Load that CSV into the database (idempotent — safe to re-run):
+docker compose exec web python manage.py load_legal_sections data/bns_sections.csv
+```
+
+A pre-scraped `backend/data/bns_sections.csv` (358 rows, 347 with IPC mappings)
+is committed, so you can just run the `load_legal_sections` step.
+
+**Fallback** (if a source site changes/blocks): the scraper degrades gracefully —
+`--no-ipc` skips the IPC table, `--ipc-map FILE.csv` supplies it locally. If
+indiacode itself is unreachable, manually download a CSV with columns
+`code, section_number, title, text, ipc_equivalent` and load it directly with
+`load_legal_sections`.
+
+## Documents — Seizure Receipt (Day 3)
+
+The Word template lives at `backend/core/doc_templates/seizure_receipt.docx` and
+is **generated from code** ([backend/core/documents.py](backend/core/documents.py)),
+so regenerate it rather than hand-editing:
+
+```sh
+docker compose exec web python manage.py build_doc_templates
+```
+
+`render_seizure_receipt(context)` fills it via docxtpl. The Day 4 API endpoint
+will feed it real Case data; `sample_seizure_context()` provides demo data today.
+
 ## Useful commands
 
 ```sh
 docker compose exec web python manage.py makemigrations
 docker compose exec web python manage.py migrate
 docker compose exec web python manage.py createsuperuser
-docker compose exec web python manage.py test core   # run tests
+docker compose exec web python manage.py test core              # run tests
+docker compose exec web python manage.py scrape_bns             # scrape BNS -> CSV
+docker compose exec web python manage.py load_legal_sections F  # load CSV
+docker compose exec web python manage.py build_doc_templates    # rebuild .docx templates
 docker compose down            # stop
 docker compose down -v         # stop + wipe the database volume
 ```
@@ -119,5 +157,13 @@ docker compose down -v         # stop + wipe the database volume
 - [x] 5 API tests passing (create-in-one-request, nested update, partial update,
       bad-index rollback, delete cascade)
 
-**Next (Day 3):** load BNS sections into `LegalSection` (CSV pending) + first
-`docxtpl` Seizure Receipt template.
+**Day 3 — complete**
+- [x] `scrape_bns` — scrapes all 358 BNS sections from India Code + IPC
+      equivalents from the NCRB corresponding-section table → CSV
+- [x] `load_legal_sections` — idempotent CSV → `LegalSection` upsert
+- [x] Committed pre-scraped CSV (358 sections, 347 IPC-mapped); loaded in DB
+- [x] Seizure Receipt `docxtpl` template (generated from code) + renderer
+- [x] 11 tests passing (5 API + 5 loader + 1 template render)
+
+**Next (Day 4):** `POST /api/cases/{id}/documents/seizure/` — fill the template
+from real Case data, save a `Document`, return a download URL.

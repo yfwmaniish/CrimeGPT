@@ -130,7 +130,7 @@ class LegalSection(models.Model):
     section_number = models.CharField(max_length=50)
     title = models.CharField(max_length=500)
     text = models.TextField()
-    ipc_equivalent = models.CharField(max_length=100, blank=True)  # the IPC->BNS bridge
+    ipc_equivalent = models.CharField(max_length=255, blank=True)  # the IPC->BNS bridge (can list several)
     # embedding = VectorField(...)  <-- added in Week 2 for retrieval
 
     class Meta:

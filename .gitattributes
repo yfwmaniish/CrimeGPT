@@ -4,3 +4,11 @@
 # Shell scripts run inside the Linux container — must stay LF or sh will fail.
 *.sh text eol=lf
 backend/entrypoint.sh text eol=lf
+
+# Binary assets — never apply text/EOL normalization (would corrupt them).
+*.docx binary
+*.doc binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.ico binary

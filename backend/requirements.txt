@@ -17,3 +17,7 @@ python-dotenv==1.0.1
 
 # --- Documents (used from Day 3 onward) ---
 docxtpl==0.18.0
+
+# --- Legal-data scraping (load_legal_sections / scrape_bns commands) ---
+requests==2.32.3
+beautifulsoup4==4.12.3

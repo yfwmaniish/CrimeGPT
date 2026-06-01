@@ -1,12 +1,18 @@
-"""API tests for nested Case writes (Day 2).
+"""Tests for the Case API (Day 2) and the legal-section loader (Day 3).
 
 Run: docker compose exec web python manage.py test core
 """
+import tempfile
+from pathlib import Path
+
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Case, User
+from .models import Case, LegalSection, User
 
 
 class NestedCaseAPITests(APITestCase):
@@ -168,3 +174,118 @@ class NestedCaseAPITests(APITestCase):
         resp = self.client.delete(reverse("case-detail", args=[case_id]))
         self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(Case.objects.count(), 0)
+
+
+class LoadLegalSectionsCommandTests(TestCase):
+    """Tests for the idempotent CSV -> LegalSection loader (Day 3)."""
+
+    HEADER = "code,section_number,title,text,ipc_equivalent\n"
+
+    def _write_csv(self, body):
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8", newline=""
+        )
+        tmp.write(self.HEADER + body)
+        tmp.close()
+        self.addCleanup(lambda: Path(tmp.name).unlink(missing_ok=True))
+        return tmp.name
+
+    def test_loads_rows_from_csv(self):
+        path = self._write_csv(
+            'BNS,103,Punishment for murder.,Whoever commits murder...,302\n'
+            'BNS,303,Theft.,Whoever intends to take...,"378, 379"\n'
+        )
+        call_command("load_legal_sections", path)
+
+        self.assertEqual(LegalSection.objects.count(), 2)
+        murder = LegalSection.objects.get(code="BNS", section_number="103")
+        self.assertEqual(murder.title, "Punishment for murder.")
+        self.assertEqual(murder.ipc_equivalent, "302")
+        theft = LegalSection.objects.get(code="BNS", section_number="303")
+        self.assertEqual(theft.ipc_equivalent, "378, 379")
+
+    def test_rerun_is_idempotent(self):
+        path = self._write_csv(
+            "BNS,103,Punishment for murder.,text,302\n"
+            "BNS,303,Theft.,text,378\n"
+        )
+        call_command("load_legal_sections", path)
+        call_command("load_legal_sections", path)  # second run
+        # No duplicates created on re-run.
+        self.assertEqual(LegalSection.objects.count(), 2)
+
+    def test_rerun_updates_changed_rows(self):
+        first = self._write_csv("BNS,103,Old title,old text,302\n")
+        call_command("load_legal_sections", first)
+
+        second = self._write_csv("BNS,103,Punishment for murder.,new text,302\n")
+        call_command("load_legal_sections", second)
+
+        self.assertEqual(LegalSection.objects.count(), 1)  # updated in place
+        murder = LegalSection.objects.get(code="BNS", section_number="103")
+        self.assertEqual(murder.title, "Punishment for murder.")
+        self.assertEqual(murder.text, "new text")
+
+    def test_missing_columns_raises(self):
+        bad = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8", newline=""
+        )
+        bad.write("code,section_number,title\nBNS,103,Murder\n")  # missing text, ipc
+        bad.close()
+        self.addCleanup(lambda: Path(bad.name).unlink(missing_ok=True))
+        with self.assertRaises(CommandError):
+            call_command("load_legal_sections", bad.name)
+
+    def test_dry_run_writes_nothing(self):
+        path = self._write_csv("BNS,103,Murder,text,302\n")
+        call_command("load_legal_sections", path, "--dry-run")
+        self.assertEqual(LegalSection.objects.count(), 0)
+
+
+class SeizureReceiptTemplateTests(TestCase):
+    """Day 3 part 2: the Seizure Receipt template renders with sample data."""
+
+    def _all_text(self, docx_path):
+        from docx import Document
+
+        doc = Document(docx_path)
+        parts = [p.text for p in doc.paragraphs]
+        for table in doc.tables:
+            for row in table.rows:
+                parts.extend(cell.text for cell in row.cells)
+        return "\n".join(parts)
+
+    def test_template_renders_with_sample_data(self):
+        import tempfile
+
+        from core.documents import (
+            build_seizure_receipt_template,
+            render_seizure_receipt,
+            sample_seizure_context,
+        )
+
+        # Build the template fresh (also exercises the builder), then render.
+        tpl_path = Path(tempfile.mkdtemp()) / "seizure_receipt.docx"
+        build_seizure_receipt_template(tpl_path)
+        self.assertTrue(tpl_path.exists())
+
+        out_path = Path(tempfile.mkdtemp()) / "rendered.docx"
+        render_seizure_receipt(sample_seizure_context(), template_path=tpl_path).save(
+            str(out_path)
+        )
+
+        text = self._all_text(out_path)
+        # Scalar fields filled in
+        self.assertIn("C-2026-001", text)
+        self.assertIn("FIR-045/2026", text)
+        self.assertIn("Inspector R. Sharma", text)
+        self.assertIn("Ravi Kumar", text)
+        # Both seized items rendered (table loop worked)
+        self.assertIn("One black mobile phone (Samsung)", text)
+        self.assertIn("Rs. 5,000", text)
+        # Witness loop worked
+        self.assertIn("Sunil Verma", text)
+        self.assertIn("Asha Devi", text)
+        # No unrendered Jinja tags left behind
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
