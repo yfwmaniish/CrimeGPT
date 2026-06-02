@@ -282,3 +282,37 @@ code {
   font-size: 0.95rem;
   margin: 0 0 0.5rem;
 }
+
+/* Sections (AI suggestions + confirm) */
+.section-list { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+.section-row {
+  display: grid;
+  grid-template-columns: auto 1fr 90px;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.5rem;
+  border-bottom: 1px solid #eef0f3;
+}
+.section-row.confirmed { background: #f0fbf4; }
+.section-confirm input { width: 1.1rem; height: 1.1rem; }
+.section-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.section-meta { font-size: 0.8rem; }
+.section-bar { height: 8px; background: #eef0f3; border-radius: 4px; overflow: hidden; }
+.section-bar span { display: block; height: 100%; background: #2f6fed; }
+
+/* Documents panel */
+.doc-list { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+.doc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.25rem;
+  border-bottom: 1px solid #eef0f3;
+  flex-wrap: wrap;
+}
+.doc-name { font-weight: 600; }
+.doc-actions { display: flex; align-items: center; gap: 0.5rem; }
+.doc-actions select { padding: 0.35rem 0.4rem; }
+.doc-dl { font-weight: 600; color: #2f6fed; }
+.doc-error { flex-basis: 100%; margin: 0.25rem 0 0; }

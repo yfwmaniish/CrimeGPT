@@ -73,6 +73,24 @@ export function generateSeizureReceipt(caseId) {
   return request(`/api/cases/${caseId}/documents/seizure/`, { method: "POST" });
 }
 
+// Generate any document type, optionally as PDF. docType is the URL segment
+// (seizure, remand, custody, medical, panchanama, faceid, chargesheet).
+export function generateDocument(caseId, docType, asPdf = false) {
+  const q = asPdf ? "?format=pdf" : "";
+  return request(`/api/cases/${caseId}/documents/${docType}/${q}`, { method: "POST" });
+}
+
+export function suggestSections(caseId, n = 6) {
+  return request(`/api/cases/${caseId}/suggest-sections/?n=${n}`, { method: "POST" });
+}
+
+export function confirmSection(caseId, caseSectionId, confirmed) {
+  return request(`/api/cases/${caseId}/sections/${caseSectionId}/confirm/`, {
+    method: "POST",
+    body: { confirmed },
+  });
+}
+
 export function getDiary(caseId) {
   return request(`/api/cases/${caseId}/diary/`);
 }

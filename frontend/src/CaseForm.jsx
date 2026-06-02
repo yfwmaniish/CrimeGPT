@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { createCase, generateSeizureReceipt, ApiError } from "./api";
+import { createCase, ApiError } from "./api";
+import Sections from "./Sections";
+import Documents from "./Documents";
 import Diary from "./Diary";
 
 const STATUSES = ["COMPLAINT", "INVESTIGATION", "ARREST", "CHARGESHEET"];
@@ -22,15 +24,6 @@ function flattenErrors(data, prefix = "") {
   );
 }
 
-function triggerDownload(url) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
 export default function CaseForm({ user }) {
   const [form, setForm] = useState({
     case_number: "",
@@ -48,9 +41,6 @@ export default function CaseForm({ user }) {
   const [errors, setErrors] = useState([]);
   const [busy, setBusy] = useState(false);
 
-  const [genResult, setGenResult] = useState(null); // { version, download_url, diary_event }
-  const [genError, setGenError] = useState(null);
-  const [genBusy, setGenBusy] = useState(false);
   const [diaryRefresh, setDiaryRefresh] = useState(0);
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -93,29 +83,7 @@ export default function CaseForm({ user }) {
     }
   }
 
-  async function generate() {
-    setGenError(null);
-    setGenBusy(true);
-    try {
-      const result = await generateSeizureReceipt(createdCase.id);
-      setGenResult(result);
-      triggerDownload(result.download_url);
-      setDiaryRefresh((n) => n + 1); // generation logged a diary event
-
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 403) {
-        setGenError(
-          "You don't have permission to generate documents. Only an Investigating Officer (IO) or Station House Officer (SHO) can do this."
-        );
-      } else {
-        setGenError(err.message || "Could not generate the document.");
-      }
-    } finally {
-      setGenBusy(false);
-    }
-  }
-
-  // ---- After the case is created: generation panel ----
+  // ---- After the case is created: sections, documents, diary ----
   if (createdCase) {
     return (
       <div className="stack">
@@ -126,56 +94,17 @@ export default function CaseForm({ user }) {
           </p>
         </section>
 
-        <section className="card">
-          <h2>Seizure Receipt</h2>
-          {!user.can_generate_documents && (
-            <p className="warn">
-              Your role ({user.role_display}) cannot generate documents — the
-              button will be refused by the server.
-            </p>
-          )}
-          <button onClick={generate} disabled={genBusy}>
-            {genBusy ? "Generating…" : "Generate Seizure Receipt"}
-          </button>
-          {genError && <p className="bad">✗ {genError}</p>}
+        <Sections caseId={createdCase.id} user={user} />
 
-          {genResult && (
-            <div className="result">
-              <p className="good">
-                ✓ Generated <strong>version {genResult.version}</strong>.{" "}
-                <a href={genResult.download_url} rel="noopener">
-                  Download again
-                </a>
-              </p>
-              <div className="diary">
-                <h3>New diary entry</h3>
-                <p>
-                  <span className="tag">{genResult.diary_event.event_type}</span>{" "}
-                  {genResult.diary_event.description}
-                </p>
-                <p className="muted">
-                  {new Date(genResult.diary_event.timestamp).toLocaleString()} · by{" "}
-                  {genResult.diary_event.actor}
-                </p>
-              </div>
-              <p className="hint">
-                Generate again to produce the next version — earlier versions are
-                kept.
-              </p>
-            </div>
-          )}
-        </section>
+        <Documents
+          caseId={createdCase.id}
+          user={user}
+          onGenerated={() => setDiaryRefresh((n) => n + 1)}
+        />
 
         <Diary caseId={createdCase.id} user={user} refreshSignal={diaryRefresh} />
 
-        <button
-          className="link-btn"
-          onClick={() => {
-            setCreatedCase(null);
-            setGenResult(null);
-            setGenError(null);
-          }}
-        >
+        <button className="link-btn" onClick={() => setCreatedCase(null)}>
           ← Create another case
         </button>
       </div>

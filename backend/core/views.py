@@ -409,3 +409,32 @@ class CaseViewSet(viewsets.ModelViewSet):
                 )
 
         return Response({"count": len(results), "results": results})
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"sections/(?P<cs_id>[^/.]+)/confirm",
+        url_name="confirm-section",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def confirm_section(self, request, pk=None, cs_id=None):
+        """Confirm (or un-confirm) a suggested section for this case — the
+        officer's explicit decision. Body: ``{"confirmed": true|false}``
+        (defaults to true). Only confirmed sections ever reach a document.
+        """
+        case = self.get_object()
+        try:
+            case_section = case.applied_sections.select_related("section").get(id=cs_id)
+        except CaseSection.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        case_section.confirmed = bool(request.data.get("confirmed", True))
+        case_section.save(update_fields=["confirmed"])
+        return Response(
+            {
+                "case_section_id": case_section.id,
+                "section_number": case_section.section.section_number,
+                "title": case_section.section.title,
+                "confirmed": case_section.confirmed,
+            }
+        )

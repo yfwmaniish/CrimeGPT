@@ -1223,3 +1223,44 @@ class DiaryAPITests(APITestCase):
     def test_unauthenticated_cannot_view(self):
         resp = self.client.get(self.url)
         self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+
+class ConfirmSectionTests(APITestCase):
+    """Week 2: officer confirms/un-confirms an AI-suggested section."""
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io_conf", password="pw", role="IO")
+        self.legal = User.objects.create_user(username="legal_conf", password="pw", role="LEGAL")
+        self.case = Case.objects.create(
+            case_number="CONF-1", fir_number="F", fir_date="2026-06-01",
+            police_station="PS", incident_narrative="theft", io=self.io,
+        )
+        sec = LegalSection.objects.create(code="BNS", section_number="305", title="Theft in a dwelling house.", text="...")
+        self.cs = CaseSection.objects.create(case=self.case, section=sec, suggested_by_ai=True, confirmed=False)
+        self.url = reverse("case-confirm-section", args=[self.case.id, self.cs.id])
+
+    def test_io_can_confirm_and_unconfirm(self):
+        self.client.force_authenticate(self.io)
+        r = self.client.post(self.url, {"confirmed": True}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK, r.data)
+        self.assertTrue(r.data["confirmed"])
+        self.cs.refresh_from_db()
+        self.assertTrue(self.cs.confirmed)
+
+        # Un-confirm too.
+        r2 = self.client.post(self.url, {"confirmed": False}, format="json")
+        self.assertFalse(r2.data["confirmed"])
+        self.cs.refresh_from_db()
+        self.assertFalse(self.cs.confirmed)
+
+    def test_confirm_defaults_to_true(self):
+        self.client.force_authenticate(self.io)
+        r = self.client.post(self.url, {}, format="json")
+        self.assertTrue(r.data["confirmed"])
+
+    def test_legal_advisor_forbidden(self):
+        self.client.force_authenticate(self.legal)
+        r = self.client.post(self.url, {"confirmed": True}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        self.cs.refresh_from_db()
+        self.assertFalse(self.cs.confirmed)  # unchanged

@@ -4,13 +4,12 @@ A single walkthrough: **log in → create a case → AI-suggest sections → con
 the right ones → generate all 7 documents (docx + PDF) → diary timeline + a
 manual event.**
 
-> **Heads-up (state of the build).** The **browser UI** today covers: sign in,
-> create a case, generate the **Seizure Receipt**, and the **diary** (view + add
-> a step). The other capabilities — **AI section suggestions**, **confirming a
-> section**, and generating the **other 6 documents / PDF** — exist as **APIs**
-> but have **no buttons yet**, so those steps are shown as terminal commands.
-> Steps are tagged **[UI]**, **[Terminal]**, or **[Admin]**. See ROUGH EDGES at
-> the bottom.
+> **Heads-up (state of the build).** The **browser UI** now covers the whole
+> flow: sign in, create a case, **Suggest BNS Sections** + **confirm** them,
+> **Generate** any of the 7 documents (DOCX or PDF), and the **diary** (view +
+> add a step). The only remaining terminal step is recording an **arrest**
+> (status + arrest event), which has no UI yet. Steps are tagged **[UI]** or
+> **[Terminal]**.
 
 ---
 
@@ -80,43 +79,29 @@ confirm step): **`admin` / `admin12345`** at http://localhost:8000/admin/.
 > echo "case $CID"
 > ```
 
-## 3. AI-suggest applicable BNS sections — **[Terminal]** *(no UI button yet)*
+## 3. AI-suggest applicable BNS sections — **[UI]**
 
-```sh
-curl -s -X POST "$B/api/cases/$CID/suggest-sections/?n=6" -H "Authorization: Token $TOK" | python -m json.tool
-```
+In the **Applicable BNS sections** panel, click **Suggest BNS Sections**. A
+ranked list appears (similarity-scored; local embeddings, no external API):
 
-Expected (similarity-ranked; local embeddings, no external API):
-
-| BNS | Title | ~score |
+| BNS | Title | ~match |
 |---|---|---|
-| 307 | Theft after preparation … causing death/hurt | 0.41 |
-| 304 | Snatching | 0.37 |
-| **305** | **Theft in a dwelling house / shop** | 0.34 |
-| **334** | **Dishonestly breaking open receptacle** | 0.34 |
-| 309 | Robbery | 0.31 |
-| **317** | **Stolen property** | 0.30 |
+| 307 | Theft after preparation … causing death/hurt | 41% |
+| 304 | Snatching | 37% |
+| **305** | **Theft in a dwelling house / shop** | 34% |
+| **334** | **Dishonestly breaking open receptacle** | 34% |
+| 309 | Robbery | 31% |
+| **317** | **Stolen property** | 30% |
 
-These are written as `CaseSection` rows with `suggested_by_ai=True,
-confirmed=False` — **nothing is auto-applied**.
+Nothing is auto-applied — each row is an unconfirmed suggestion.
 
-## 4. Confirm the *right* sections — **[Admin]** *(no confirm API/UI yet)*
+## 4. Confirm the *right* sections — **[UI]**
 
-The officer keeps the applicable ones and ignores the off-target suggestions.
-For break-in + theft + recovered goods: confirm **305, 334, 317**; leave 307 /
-304 / 309 unconfirmed.
+Tick the checkbox on the sections that apply — for break-in + theft + recovered
+goods: **305, 334, 317**. Leave 307 / 304 / 309 unticked. Each ticked row turns
+green ("✓ confirmed"). Only confirmed sections reach the documents.
 
-1. http://localhost:8000/admin/ → sign in as `admin`.
-2. **Core › Case sections** → filter/open the rows for this case.
-3. Tick **Confirmed** on **BNS 305, 334, 317** → **Save**.
-
-> Fast path (equivalent):
-> ```sh
-> docker compose exec web python manage.py shell -c "from core.models import CaseSection as C; \
->   print(C.objects.filter(case_id=$CID, section__section_number__in=['305','317','334']).update(confirmed=True))"
-> ```
-
-## 5. Record the arrest — **[Terminal]**
+## 5. Record the arrest — **[Terminal]** *(no UI yet)*
 
 So the Remand has arrest details and the case shows ARREST:
 
@@ -128,30 +113,17 @@ DiaryEvent.objects.create(case=c, timestamp=timezone.now(), event_type='ARREST',
   description='Accused Imran Shaikh arrested near Kalupur bus stand.', actor=c.io)"
 ```
 
-## 6. Generate the Seizure Receipt — **[UI]**
+## 6. Generate the documents — **[UI]**
 
-1. On the **✓ Case created** screen, click **Generate Seizure Receipt**.
-2. You get **✓ Generated version 1**, the `.docx` downloads, and the **New diary
-   entry** shows. (Click again → version 2; earlier versions are kept.)
+In the **Generate documents** panel, all 7 are listed. For each you want:
+1. Pick **DOCX** or **PDF** in the dropdown (try PDF on **Remand Request** and
+   **Purvani Chargesheet**).
+2. Click **Generate** → the file downloads, the row shows **· v1**, and a
+   **Download** link appears. Click **Generate** again → **v2** (earlier versions
+   are kept, never overwritten).
 
-## 7. Generate the other 6 documents (+ a couple as PDF) — **[Terminal]** *(no UI buttons yet)*
-
-```sh
-for d in remand:pdf custody medical panchanama faceid chargesheet:pdf; do
-  doc=${d%%:*}; fmt=${d#*:}; q=""; [ "$fmt" != "$doc" ] && q="?format=$fmt"
-  curl -s -X POST "$B/api/cases/$CID/documents/$doc/$q" -H "Authorization: Token $TOK" \
-    | python -c "import sys,json;x=json.load(sys.stdin);print(f\"{x['doc_type']:<12} v{x['version']}  {(x.get('pdf_url') or x['docx_url']).split('/')[-1]}\")"
-done
-```
-
-Expected — all seven now exist on the case; **Remand Request** and **Purvani
-Chargesheet** also have a PDF. The confirmed sections (305/334/317) appear in the
-Remand/Custody/Chargesheet; the unconfirmed ones never do.
-
-Download any PDF (e.g. the Remand):
-```sh
-curl -s "$B/media/documents/remand_request_case${CID}_v1.pdf" -o remand.pdf && echo "saved remand.pdf"
-```
+The confirmed sections (305/334/317) appear in the Remand/Custody/Chargesheet;
+the unconfirmed ones never do.
 
 ## 8. Diary timeline + add a manual step — **[UI]**
 
