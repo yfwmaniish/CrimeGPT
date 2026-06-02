@@ -150,6 +150,38 @@ indiacode itself is unreachable, manually download a CSV with columns
 `code, section_number, title, text, ipc_equivalent` and load it directly with
 `load_legal_sections`.
 
+## Legal section suggestions — local AI retrieval (Week 2, Track A)
+
+Suggests applicable BNS sections for a case by semantic similarity, fully local
+(no external API). Section text is embedded with the `all-MiniLM-L6-v2`
+sentence-transformer (384-d, baked into the image) and searched with pgvector
+cosine distance.
+
+```sh
+# Embed the loaded sections (idempotent; --force re-embeds, --limit N for testing):
+docker compose exec web python manage.py embed_legal_sections
+```
+
+```
+POST /api/cases/{id}/suggest-sections/        # optional ?n=5
+```
+
+Embeds the case's `incident_narrative`, returns the top N sections with
+similarity scores, **and records each as a `CaseSection` with
+`suggested_by_ai=True, confirmed=False`**:
+
+```json
+{ "count": 5, "results": [
+  { "section_number": "305", "title": "Theft in a dwelling house...",
+    "ipc_equivalent": "380", "similarity": 0.41,
+    "suggested_by_ai": true, "confirmed": false, "case_section_id": 1 } ]}
+```
+
+**Safety principle (load-bearing):** AI only *suggests*. Sections are never
+auto-confirmed, re-running never duplicates or un-confirms existing rows, and no
+unconfirmed section is ever written into a document. Officer confirmation is a
+separate explicit action.
+
 ## Documents — Seizure Receipt (Day 3)
 
 The Word template lives at `backend/core/doc_templates/seizure_receipt.docx` and

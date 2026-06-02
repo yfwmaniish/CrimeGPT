@@ -21,3 +21,8 @@ docxtpl==0.18.0
 # --- Legal-data scraping (load_legal_sections / scrape_bns commands) ---
 requests==2.32.3
 beautifulsoup4==4.12.3
+
+# --- Local embeddings for legal-section retrieval (Week 2, Track A) ---
+# torch (CPU build) is installed separately in the Dockerfile to avoid the
+# multi-GB CUDA wheels. sentence-transformers provides all-MiniLM-L6-v2 (384-d).
+sentence-transformers==3.3.1

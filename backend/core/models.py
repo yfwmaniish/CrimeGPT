@@ -10,6 +10,7 @@ Statement). The ``embedding`` VectorField on LegalSection is deferred to Week 2.
 """
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from pgvector.django import VectorField
 from simple_history.models import HistoricalRecords
 
 
@@ -131,7 +132,8 @@ class LegalSection(models.Model):
     title = models.CharField(max_length=500)
     text = models.TextField()
     ipc_equivalent = models.CharField(max_length=255, blank=True)  # the IPC->BNS bridge (can list several)
-    # embedding = VectorField(...)  <-- added in Week 2 for retrieval
+    # 384-dim vector from all-MiniLM-L6-v2; populated by embed_legal_sections.
+    embedding = VectorField(dimensions=384, null=True, blank=True)
 
     class Meta:
         ordering = ["code", "section_number"]

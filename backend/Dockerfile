@@ -15,8 +15,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Install the CPU-only build of torch first so the heavy CUDA wheels are never
+# pulled in by sentence-transformers.
+RUN pip install --upgrade pip \
+    && pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install -r requirements.txt
+
+# Bake the embedding model into the image so retrieval is fully local at runtime
+# (no download on first request, and tests don't need network).
+ENV HF_HOME=/opt/hf-cache
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 COPY . .
 

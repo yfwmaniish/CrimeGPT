@@ -13,7 +13,16 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Case, DiaryEvent, Document, LegalSection, Party, SeizedItem, User
+from .models import (
+    Case,
+    CaseSection,
+    DiaryEvent,
+    Document,
+    LegalSection,
+    Party,
+    SeizedItem,
+    User,
+)
 
 _TEST_MEDIA = tempfile.mkdtemp(prefix="crimegpt-media-")
 
@@ -457,3 +466,136 @@ class SeizureContextMappingTests(TestCase):
         # ...not merely in the items table.
         self.assertIn("Asha Devi", table)
         self.assertNotIn("from , child/spouse of , resident of :", paragraphs)
+
+
+class LegalRetrievalTests(APITestCase):
+    """Week 2 Track A: local embedding + pgvector section suggestions."""
+
+    # A small representative corpus with realistic BNS-style text.
+    CORPUS = [
+        ("303", "Theft.",
+         "Whoever, intending to take dishonestly any movable property out of the "
+         "possession of any person without that person's consent, moves that "
+         "property in order to such taking, is said to commit theft."),
+        ("305", "Theft in a dwelling house.",
+         "Whoever commits theft in any building, tent or vessel used as a human "
+         "dwelling or for the custody of property shall be punished with "
+         "imprisonment and fine."),
+        ("330", "House-trespass and house-breaking.",
+         "Whoever commits criminal trespass by entering into or remaining in any "
+         "building used as a human dwelling commits house-trespass; house-breaking "
+         "is committed by effecting entrance into a house by breaking a lock or door."),
+        ("103", "Punishment for murder.",
+         "Whoever commits murder shall be punished with death or imprisonment for "
+         "life, and shall also be liable to fine."),
+        ("318", "Cheating.",
+         "Whoever by deceiving any person fraudulently or dishonestly induces the "
+         "person so deceived to deliver any property is said to cheat."),
+        ("309", "Robbery.",
+         "In all robbery there is either theft or extortion; theft is robbery if "
+         "the offender voluntarily causes or attempts to cause death, hurt or "
+         "wrongful restraint while committing the theft."),
+        ("351", "Criminal intimidation.",
+         "Whoever threatens another with any injury to his person, reputation or "
+         "property with intent to cause alarm commits criminal intimidation."),
+        ("115", "Voluntarily causing hurt.",
+         "Whoever causes bodily pain, disease or infirmity to any person voluntarily "
+         "is said to voluntarily cause hurt and shall be punished."),
+    ]
+
+    THEFT_NARRATIVE = (
+        "The accused broke open the lock of the complainant's house at night and "
+        "stole gold ornaments and cash from inside the dwelling."
+    )
+
+    def setUp(self):
+        for number, title, text in self.CORPUS:
+            LegalSection.objects.create(
+                code="BNS", section_number=number, title=title, text=text
+            )
+        self.io = User.objects.create_user(username="io_ret", password="pw", role="IO")
+        self.case = Case.objects.create(
+            case_number="RET-1", fir_number="FIR-RET", fir_date="2026-06-01",
+            police_station="PS-Central", incident_narrative=self.THEFT_NARRATIVE, io=self.io,
+        )
+        self.client.force_authenticate(self.io)
+        self.url = reverse("case-suggest-sections", args=[self.case.id])
+
+    # -- embedding command ------------------------------------------------
+    def test_embed_command_populates_vectors(self):
+        self.assertEqual(LegalSection.objects.filter(embedding__isnull=False).count(), 0)
+        call_command("embed_legal_sections")
+        sections = LegalSection.objects.all()
+        self.assertTrue(all(s.embedding is not None for s in sections))
+        self.assertEqual(len(sections[0].embedding), 384)
+
+    def test_embed_command_is_idempotent(self):
+        from io import StringIO
+
+        call_command("embed_legal_sections")
+        out = StringIO()
+        call_command("embed_legal_sections", stdout=out)  # second run
+        self.assertIn("Nothing to embed", out.getvalue())
+
+    # -- suggestion endpoint ---------------------------------------------
+    def test_suggest_returns_sensible_ranked_sections(self):
+        call_command("embed_legal_sections")
+        resp = self.client.post(self.url, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+
+        results = resp.data["results"]
+        self.assertGreaterEqual(len(results), 1)
+        self.assertLessEqual(len(results), 5)  # default top-N
+
+        # Scores are descending.
+        scores = [r["similarity"] for r in results]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+        # The top hit is theft/house-trespass, not murder/cheating/hurt.
+        top_title = results[0]["title"].lower()
+        self.assertTrue(
+            "theft" in top_title or "trespass" in top_title or "house" in top_title,
+            f"unexpected top section: {results[0]}",
+        )
+        top3 = {r["section_number"] for r in results[:3]}
+        self.assertTrue(top3 & {"303", "305", "330"}, f"top-3 were {top3}")
+
+    def test_suggestions_are_created_unconfirmed(self):
+        call_command("embed_legal_sections")
+        resp = self.client.post(self.url, format="json")
+        results = resp.data["results"]
+
+        links = CaseSection.objects.filter(case=self.case)
+        self.assertEqual(links.count(), len(results))
+        for link in links:
+            self.assertTrue(link.suggested_by_ai)
+            self.assertFalse(link.confirmed)  # never auto-confirmed
+        # response echoes the unconfirmed state
+        self.assertTrue(all(r["suggested_by_ai"] and not r["confirmed"] for r in results))
+
+    def test_rerun_does_not_duplicate_or_unconfirm(self):
+        call_command("embed_legal_sections")
+        first = self.client.post(self.url, format="json").data["results"]
+        count_after_first = CaseSection.objects.filter(case=self.case).count()
+
+        # Officer confirms one suggestion (the separate explicit action).
+        confirmed_id = first[0]["case_section_id"]
+        cs = CaseSection.objects.get(id=confirmed_id)
+        cs.confirmed = True
+        cs.save()
+
+        # Re-run suggest.
+        self.client.post(self.url, format="json")
+
+        # No duplicate rows, and the confirmed one stays confirmed.
+        self.assertEqual(
+            CaseSection.objects.filter(case=self.case).count(), count_after_first
+        )
+        cs.refresh_from_db()
+        self.assertTrue(cs.confirmed)
+
+    def test_suggest_requires_a_narrative(self):
+        self.case.incident_narrative = ""
+        self.case.save()
+        resp = self.client.post(self.url, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)

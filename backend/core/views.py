@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .documents import build_seizure_context_from_case, render_seizure_receipt
-from .models import Case, DiaryEvent, Document
+from .models import Case, CaseSection, DiaryEvent, Document, LegalSection
 from .serializers import CaseSerializer
 
 
@@ -142,3 +142,71 @@ class CaseViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="suggest-sections",
+        url_name="suggest-sections",
+        permission_classes=[IsAuthenticated],
+    )
+    def suggest_sections(self, request, pk=None):
+        """Suggest BNS sections for this case by semantic similarity to its
+        incident_narrative.
+
+        Embeds the narrative, runs a pgvector cosine search over LegalSection,
+        and records the top N as CaseSection rows with suggested_by_ai=True,
+        confirmed=False. AI suggests; the officer confirms separately. Existing
+        rows (including ones already confirmed) are never modified, so re-running
+        never duplicates or auto-confirms anything.
+        """
+        from pgvector.django import CosineDistance
+
+        from .embeddings import embed_text
+
+        case = self.get_object()
+        narrative = (case.incident_narrative or "").strip()
+        if not narrative:
+            return Response(
+                {"detail": "This case has no incident_narrative to analyse."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            top_n = int(request.query_params.get("n", 5))
+        except (TypeError, ValueError):
+            top_n = 5
+        top_n = max(1, min(top_n, 50))
+
+        query_vector = embed_text(narrative)
+        candidates = (
+            LegalSection.objects.filter(embedding__isnull=False)
+            .annotate(distance=CosineDistance("embedding", query_vector))
+            .order_by("distance")[:top_n]
+        )
+
+        results = []
+        with transaction.atomic():
+            for section in candidates:
+                # get_or_create never touches an existing row, so a previously
+                # confirmed suggestion stays confirmed and is not duplicated.
+                case_section, _ = CaseSection.objects.get_or_create(
+                    case=case,
+                    section=section,
+                    defaults={"suggested_by_ai": True, "confirmed": False},
+                )
+                results.append(
+                    {
+                        "case_section_id": case_section.id,
+                        "section_id": section.id,
+                        "code": section.code,
+                        "section_number": section.section_number,
+                        "title": section.title,
+                        "ipc_equivalent": section.ipc_equivalent,
+                        "similarity": round(1.0 - float(section.distance), 4),
+                        "suggested_by_ai": case_section.suggested_by_ai,
+                        "confirmed": case_section.confirmed,
+                    }
+                )
+
+        return Response({"count": len(results), "results": results})
