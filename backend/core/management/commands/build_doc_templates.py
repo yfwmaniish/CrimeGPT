@@ -4,7 +4,9 @@ from django.core.management.base import BaseCommand
 from core.documents import (
     build_chargesheet_template,
     build_court_custody_template,
+    build_faceid_template,
     build_medical_treatment_template,
+    build_panchanama_template,
     build_remand_request_template,
     build_seizure_receipt_template,
 )
@@ -15,6 +17,8 @@ BUILDERS = [
     ("Court Custody Letter", build_court_custody_template),
     ("Medical Treatment Letter", build_medical_treatment_template),
     ("Purvani Chargesheet", build_chargesheet_template),
+    ("Accused Panchanama", build_panchanama_template),
+    ("Face Identification Form", build_faceid_template),
 ]
 
 

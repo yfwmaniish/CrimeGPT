@@ -16,12 +16,16 @@ from rest_framework.views import APIView
 from .documents import (
     build_chargesheet_context_from_case,
     build_court_custody_context_from_case,
+    build_faceid_context_from_case,
     build_medical_context_from_case,
+    build_panchanama_context_from_case,
     build_remand_context_from_case,
     build_seizure_context_from_case,
     render_chargesheet,
     render_court_custody_letter,
+    render_faceid,
     render_medical_treatment_letter,
+    render_panchanama,
     render_remand_request,
     render_seizure_receipt,
 )
@@ -238,6 +242,42 @@ class CaseViewSet(viewsets.ModelViewSet):
             request, case,
             doc_type="CHARGESHEET", label="Purvani Chargesheet",
             filename_prefix="purvani_chargesheet", rendered=rendered,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="documents/panchanama",
+        url_name="generate-panchanama",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def generate_panchanama(self, request, pk=None):
+        """Generate (or regenerate, versioned) the Accused Panchanama
+        (accused + panch witnesses + seized articles)."""
+        case = self.get_object()
+        rendered = render_panchanama(build_panchanama_context_from_case(case))
+        return self._finalize_document(
+            request, case,
+            doc_type="PANCHANAMA", label="Accused Panchanama",
+            filename_prefix="accused_panchanama", rendered=rendered,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="documents/faceid",
+        url_name="generate-faceid",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def generate_faceid(self, request, pk=None):
+        """Generate (or regenerate, versioned) the Face Identification Form
+        (accused particulars + a placeholder box for an affixed photograph)."""
+        case = self.get_object()
+        rendered = render_faceid(build_faceid_context_from_case(case))
+        return self._finalize_document(
+            request, case,
+            doc_type="FACEID", label="Face Identification Form",
+            filename_prefix="face_identification_form", rendered=rendered,
         )
 
     @action(

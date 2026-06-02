@@ -979,3 +979,131 @@ class ChargesheetTests(APITestCase):
         resp = self.client.post(self.url)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(Document.objects.filter(case=self.case, doc_type="CHARGESHEET").count(), 0)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class PanchanamaTests(APITestCase):
+    """Week 2 Track B: Accused Panchanama (accused + witnesses + items)."""
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io_pan", password="pw", role="IO", police_station="PS-Central")
+        self.legal = User.objects.create_user(username="legal_pan", password="pw", role="LEGAL")
+        self.case = Case.objects.create(
+            case_number="PAN-1", fir_number="FIR-PAN", fir_date="2026-06-01",
+            police_station="PS-Central", incident_narrative="Break-in and theft.", io=self.io,
+        )
+        self.accused = Party.objects.create(case=self.case, role="ACCUSED", name="Ravi Kumar", parent_name="Mohan Kumar", address="12 MG Road")
+        Party.objects.create(case=self.case, role="WITNESS", name="Sunil Verma", parent_name="Gopal", address="5 Nehru Road")
+        Party.objects.create(case=self.case, role="WITNESS", name="Meena Joshi", parent_name="Hari", address="7 Tagore Lane")
+        SeizedItem.objects.create(case=self.case, description="One mobile phone", quantity="1", seized_from=self.accused)
+        SeizedItem.objects.create(case=self.case, description="Stolen gold chain", quantity="1", seized_from=self.accused)
+        self.url = reverse("case-generate-panchanama", args=[self.case.id])
+
+    def _all_text(self, case):
+        from io import BytesIO
+
+        from docx import Document as Docx
+
+        from core.documents import build_panchanama_context_from_case, render_panchanama
+
+        tpl = render_panchanama(build_panchanama_context_from_case(case))
+        buf = BytesIO()
+        tpl.save(buf)
+        buf.seek(0)
+        doc = Docx(buf)
+        parts = [p.text for p in doc.paragraphs]
+        for t in doc.tables:
+            for row in t.rows:
+                parts.extend(c.text for c in row.cells)
+        return "\n".join(parts)
+
+    def test_render_lands_accused_witnesses_and_items(self):
+        text = self._all_text(self.case)
+        # Accused
+        self.assertIn("Ravi Kumar", text)
+        self.assertIn("12 MG Road", text)
+        # Both witnesses (table loop)
+        self.assertIn("Sunil Verma", text)
+        self.assertIn("Meena Joshi", text)
+        # Both items (table loop)
+        self.assertIn("One mobile phone", text)
+        self.assertIn("Stolen gold chain", text)
+        # No leftover Jinja
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
+
+    def test_io_generates_versioned_with_diary(self):
+        self.client.force_authenticate(self.io)
+        r1 = self.client.post(self.url)
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED, r1.data)
+        self.assertEqual(r1.data["doc_type"], "PANCHANAMA")
+        self.assertEqual(r1.data["version"], 1)
+        r2 = self.client.post(self.url)
+        self.assertEqual(r2.data["version"], 2)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="PANCHANAMA").count(), 2)
+        self.assertIn("Accused Panchanama", self.case.diary.filter(event_type="DOCUMENT_GENERATED").first().description)
+
+    def test_legal_advisor_forbidden(self):
+        self.client.force_authenticate(self.legal)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="PANCHANAMA").count(), 0)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class FaceIdFormTests(APITestCase):
+    """Week 2 Track B: Face Identification Form (accused + photo placeholder)."""
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io_fid", password="pw", role="IO", police_station="PS-Central")
+        self.legal = User.objects.create_user(username="legal_fid", password="pw", role="LEGAL")
+        self.case = Case.objects.create(
+            case_number="FID-1", fir_number="FIR-FID", fir_date="2026-06-01",
+            police_station="PS-Central", incident_narrative="Theft.", io=self.io,
+        )
+        Party.objects.create(case=self.case, role="ACCUSED", name="Ravi Kumar", parent_name="Mohan Kumar", age=28, gender="Male", address="12 MG Road")
+        self.url = reverse("case-generate-faceid", args=[self.case.id])
+
+    def _all_text(self, case):
+        from io import BytesIO
+
+        from docx import Document as Docx
+
+        from core.documents import build_faceid_context_from_case, render_faceid
+
+        tpl = render_faceid(build_faceid_context_from_case(case))
+        buf = BytesIO()
+        tpl.save(buf)
+        buf.seek(0)
+        doc = Docx(buf)
+        parts = [p.text for p in doc.paragraphs]
+        for t in doc.tables:
+            for row in t.rows:
+                parts.extend(c.text for c in row.cells)
+        return "\n".join(parts)
+
+    def test_render_lands_accused_and_photo_placeholder(self):
+        text = self._all_text(self.case)
+        self.assertIn("Ravi Kumar", text)
+        self.assertIn("Mohan Kumar", text)
+        self.assertIn("12 MG Road", text)
+        # The photo placeholder box (no image field on Party yet).
+        self.assertIn("AFFIX RECENT PHOTOGRAPH", text)
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
+
+    def test_io_generates_versioned_with_diary(self):
+        self.client.force_authenticate(self.io)
+        r1 = self.client.post(self.url)
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED, r1.data)
+        self.assertEqual(r1.data["doc_type"], "FACEID")
+        self.assertEqual(r1.data["version"], 1)
+        r2 = self.client.post(self.url)
+        self.assertEqual(r2.data["version"], 2)
+        self.assertIn("Face Identification Form", self.case.diary.filter(event_type="DOCUMENT_GENERATED").first().description)
+
+    def test_legal_advisor_forbidden(self):
+        self.client.force_authenticate(self.legal)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="FACEID").count(), 0)

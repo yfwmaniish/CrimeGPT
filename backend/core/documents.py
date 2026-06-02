@@ -26,6 +26,8 @@ REMAND_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "remand_request.docx"
 COURT_CUSTODY_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "court_custody_letter.docx"
 MEDICAL_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "medical_treatment_letter.docx"
 CHARGESHEET_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "purvani_chargesheet.docx"
+PANCHANAMA_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "accused_panchanama.docx"
+FACEID_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "face_identification_form.docx"
 
 # Columns of the seized-items table: (header label, per-row Jinja tag).
 _ITEM_COLUMNS = [
@@ -771,4 +773,229 @@ def build_chargesheet_context_from_case(case) -> dict:
         "seized_items": seized_items,
         "statements": statements,
         "diary": diary,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Accused Panchanama (proceedings witnessed by panch witnesses)
+# --------------------------------------------------------------------------- #
+def build_panchanama_template(path: Path = PANCHANAMA_TEMPLATE_PATH) -> Path:
+    """Create the Accused Panchanama .docx template (witnesses + items tables)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = Document()
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title.add_run("PANCHANAMA (ACCUSED)")
+    run.bold = True
+    run.font.size = Pt(15)
+
+    meta = doc.add_paragraph()
+    meta.add_run("Police Station: ").bold = True
+    meta.add_run("{{ case.police_station }}    ")
+    meta.add_run("FIR No.: ").bold = True
+    meta.add_run("{{ case.fir_number }}    ")
+    meta.add_run("Case No.: ").bold = True
+    meta.add_run("{{ case.case_number }}")
+
+    datep = doc.add_paragraph()
+    datep.add_run("Date: ").bold = True
+    datep.add_run("{{ today }}")
+
+    doc.add_paragraph(
+        "This panchanama is drawn on {{ today }} at Police Station "
+        "{{ case.police_station }} in the presence of the panch witnesses named "
+        "below, in connection with the above-mentioned case."
+    )
+    doc.add_paragraph(
+        "Accused: {{ accused.name }}, child/spouse of {{ accused.parent_name }}, "
+        "resident of {{ accused.address }}."
+    )
+
+    _add_section_heading(doc, "Panch Witnesses")
+    _add_loop_table(
+        doc,
+        [
+            ("Name", "{{ w.name }}"),
+            ("Father's/Husband's Name", "{{ w.parent_name }}"),
+            ("Address", "{{ w.address }}"),
+        ],
+        "for w in witnesses",
+    )
+
+    _add_section_heading(doc, "Articles")
+    _add_loop_table(
+        doc,
+        [
+            ("S.No", "{{ item.sno }}"),
+            ("Description", "{{ item.description }}"),
+            ("Quantity", "{{ item.quantity }}"),
+            ("Seized From", "{{ item.seized_from }}"),
+            ("Date", "{{ item.seizure_date }}"),
+            ("Place", "{{ item.seizure_place }}"),
+        ],
+        "for item in seized_items",
+    )
+
+    doc.add_paragraph("Brief facts: {{ case.incident_narrative }}")
+
+    doc.add_paragraph()  # spacer
+    doc.add_paragraph(
+        "Signatures of panch witnesses: {% for w in witnesses %}{{ loop.index }}. "
+        "{{ w.name }} __________  {% endfor %}"
+    )
+    sig = doc.add_paragraph()
+    sig.add_run("Signature of Investigating Officer: __________________  ")
+    sig.add_run("({{ officer.name }}, {{ officer.role }})")
+
+    doc.save(str(path))
+    return path
+
+
+def render_panchanama(context: dict, template_path: Path = PANCHANAMA_TEMPLATE_PATH) -> DocxTemplate:
+    """Render the Accused Panchanama template with ``context``."""
+    tpl = DocxTemplate(str(template_path))
+    tpl.render(context)
+    return tpl
+
+
+def build_panchanama_context_from_case(case) -> dict:
+    """Map a Case (+ accused, witnesses, seized items) to the Panchanama context."""
+
+    def fmt_date(d):
+        return d.strftime("%d-%m-%Y") if d else ""
+
+    accused = resolve_seized_from_person(case)  # accused, else seized-from party
+    officer = case.io
+
+    witnesses = [
+        {"name": w.name, "parent_name": w.parent_name, "address": w.address}
+        for w in case.parties.filter(role="WITNESS")
+    ]
+    seized_items = [
+        {
+            "sno": i,
+            "description": item.description,
+            "quantity": item.quantity,
+            "seized_from": item.seized_from.name if item.seized_from else "",
+            "seizure_date": fmt_date(item.seizure_date),
+            "seizure_place": item.seizure_place,
+        }
+        for i, item in enumerate(case.seized_items.all(), start=1)
+    ]
+
+    return {
+        "today": timezone.localdate().strftime("%d-%m-%Y"),
+        "case": {
+            "case_number": case.case_number,
+            "fir_number": case.fir_number,
+            "police_station": case.police_station,
+            "incident_place": case.incident_place,
+            "incident_narrative": case.incident_narrative,
+        },
+        "officer": {
+            "name": (officer.get_full_name() or officer.username) if officer else "",
+            "role": officer.get_role_display() if (officer and officer.role) else "",
+            "police_station": officer.police_station if officer else "",
+        },
+        "accused": {
+            "name": accused.name if accused else "",
+            "parent_name": accused.parent_name if accused else "",
+            "address": accused.address if accused else "",
+        },
+        "witnesses": witnesses,
+        "seized_items": seized_items,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Face Identification Form
+# --------------------------------------------------------------------------- #
+def build_faceid_template(path: Path = FACEID_TEMPLATE_PATH) -> Path:
+    """Create the Face Identification Form .docx template.
+
+    TODO(evidence-image-upload bonus): there is no image field on Party yet, so
+    the form leaves a bordered box for a physically affixed/pasted photograph.
+    When the Party photo / evidence-image upload feature lands, replace the
+    placeholder box with an InlineImage of the accused's photo.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = Document()
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title.add_run("FACE IDENTIFICATION FORM")
+    run.bold = True
+    run.font.size = Pt(15)
+
+    meta = doc.add_paragraph()
+    meta.add_run("Police Station: ").bold = True
+    meta.add_run("{{ case.police_station }}    ")
+    meta.add_run("FIR No.: ").bold = True
+    meta.add_run("{{ case.fir_number }}    ")
+    meta.add_run("Case No.: ").bold = True
+    meta.add_run("{{ case.case_number }}")
+
+    datep = doc.add_paragraph()
+    datep.add_run("Date: ").bold = True
+    datep.add_run("{{ today }}")
+
+    _add_section_heading(doc, "Particulars of the Accused")
+    doc.add_paragraph("Name: {{ accused.name }}")
+    doc.add_paragraph("Father's/Husband's Name: {{ accused.parent_name }}")
+    doc.add_paragraph("Age: {{ accused.age }}    Gender: {{ accused.gender }}")
+    doc.add_paragraph("Address: {{ accused.address }}")
+
+    # Photo placeholder box (no image field on Party yet -- see TODO above).
+    photo = doc.add_table(rows=1, cols=1)
+    photo.style = "Table Grid"
+    cell = photo.rows[0].cells[0]
+    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _set_cell(cell, "[ AFFIX RECENT PHOTOGRAPH OF THE ACCUSED HERE ]")
+    photo.rows[0].height = Pt(140)
+
+    doc.add_paragraph()  # spacer
+    sig = doc.add_paragraph()
+    sig.add_run("Signature of Investigating Officer: __________________  ")
+    sig.add_run("({{ officer.name }}, {{ officer.role }})")
+
+    doc.save(str(path))
+    return path
+
+
+def render_faceid(context: dict, template_path: Path = FACEID_TEMPLATE_PATH) -> DocxTemplate:
+    """Render the Face Identification Form template with ``context``."""
+    tpl = DocxTemplate(str(template_path))
+    tpl.render(context)
+    return tpl
+
+
+def build_faceid_context_from_case(case) -> dict:
+    """Map a Case (+ accused) to the Face Identification Form context."""
+    accused = resolve_seized_from_person(case)  # accused, else seized-from party
+    officer = case.io
+
+    return {
+        "today": timezone.localdate().strftime("%d-%m-%Y"),
+        "case": {
+            "case_number": case.case_number,
+            "fir_number": case.fir_number,
+            "police_station": case.police_station,
+        },
+        "officer": {
+            "name": (officer.get_full_name() or officer.username) if officer else "",
+            "role": officer.get_role_display() if (officer and officer.role) else "",
+            "police_station": officer.police_station if officer else "",
+        },
+        "accused": {
+            "name": accused.name if accused else "",
+            "parent_name": accused.parent_name if accused else "",
+            "age": accused.age if (accused and accused.age is not None) else "",
+            "gender": accused.gender if accused else "",
+            "address": accused.address if accused else "",
+        },
     }

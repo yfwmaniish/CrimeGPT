@@ -122,6 +122,24 @@ returns a download URL:
 - **Versioning:** regenerating never overwrites — it creates a new `Document`
   with `version` incremented (v1, v2, ...), keeping the full history.
 
+### All document endpoints (Week 2, Track B — all 7 built)
+
+Every document follows the same pattern (template-from-code → context-builder →
+shared `_finalize_document`: versioned, IO/SHO-only, logs a `DiaryEvent`).
+
+| Endpoint | Document | Pulls from |
+|---|---|---|
+| `POST /api/cases/{id}/documents/seizure/`     | Seizure Receipt      | accused/seized-from + seized items |
+| `POST /api/cases/{id}/documents/remand/`      | Remand Request (PC)  | accused + **confirmed** sections + arrest diary event |
+| `POST /api/cases/{id}/documents/custody/`     | Court Custody Letter | accused + **confirmed** sections |
+| `POST /api/cases/{id}/documents/medical/`     | Medical Treatment    | victim → accused → blank + incident |
+| `POST /api/cases/{id}/documents/panchanama/`  | Accused Panchanama   | accused + witnesses + seized items |
+| `POST /api/cases/{id}/documents/faceid/`      | Face Identification  | accused + photo placeholder box (see TODO) |
+| `POST /api/cases/{id}/documents/chargesheet/` | Purvani Chargesheet  | everything (the superset) |
+
+Only **confirmed** `CaseSection`s ever reach a document. Word templates are built
+from code — regenerate with `python manage.py build_doc_templates`.
+
 Run the API tests:
 
 ```sh
