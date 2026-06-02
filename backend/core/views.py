@@ -30,6 +30,7 @@ from .documents import (
     render_seizure_receipt,
 )
 from .models import Case, CaseSection, DiaryEvent, Document, LegalSection
+from .pdf import convert_docx_to_pdf
 from .serializers import CaseSerializer
 
 
@@ -97,12 +98,19 @@ class CaseViewSet(viewsets.ModelViewSet):
     )
 
     def _finalize_document(self, request, case, *, doc_type, label, filename_prefix, rendered):
-        """Shared generation tail: version (never overwrite), save the Document,
-        log a DiaryEvent, return the standard response. Used by every document
-        endpoint so versioning + audit logic lives in one place.
+        """Shared generation tail: version (never overwrite), save the Document
+        (.docx, plus PDF when requested), log a DiaryEvent, return the standard
+        response. Used by every document endpoint so versioning + audit + PDF
+        logic lives in one place.
+
+        Pass ``?format=pdf`` to also render a PDF (LibreOffice headless), store it
+        on the Document, and make it the primary download.
         """
         buffer = io.BytesIO()
         rendered.save(buffer)
+        docx_bytes = buffer.getvalue()
+
+        want_pdf = request.query_params.get("format", "").lower() == "pdf"
 
         last_version = (
             Document.objects.filter(case=case, doc_type=doc_type).aggregate(
@@ -111,14 +119,16 @@ class CaseViewSet(viewsets.ModelViewSet):
             or 0
         )
         version = last_version + 1
+        base_name = f"{filename_prefix}_case{case.id}_v{version}"
+
+        # Convert before opening the transaction (it shells out to LibreOffice).
+        pdf_bytes = convert_docx_to_pdf(docx_bytes) if want_pdf else None
 
         with transaction.atomic():
             document = Document(case=case, doc_type=doc_type, version=version)
-            document.file.save(
-                f"{filename_prefix}_case{case.id}_v{version}.docx",
-                ContentFile(buffer.getvalue()),
-                save=False,
-            )
+            document.file.save(f"{base_name}.docx", ContentFile(docx_bytes), save=False)
+            if pdf_bytes is not None:
+                document.pdf_file.save(f"{base_name}.pdf", ContentFile(pdf_bytes), save=False)
             document.save()
 
             event = DiaryEvent.objects.create(
@@ -129,12 +139,18 @@ class CaseViewSet(viewsets.ModelViewSet):
                 actor=request.user,
             )
 
+        docx_url = request.build_absolute_uri(document.file.url)
+        pdf_url = request.build_absolute_uri(document.pdf_file.url) if document.pdf_file else None
+
         return Response(
             {
                 "id": document.id,
                 "doc_type": document.doc_type,
                 "version": document.version,
-                "download_url": request.build_absolute_uri(document.file.url),
+                "docx_url": docx_url,
+                "pdf_url": pdf_url,
+                # Primary download follows the requested format.
+                "download_url": pdf_url if want_pdf else docx_url,
                 "generated_at": document.generated_at,
                 "diary_event": {
                     "id": event.id,

@@ -1107,3 +1107,44 @@ class FaceIdFormTests(APITestCase):
         resp = self.client.post(self.url)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(Document.objects.filter(case=self.case, doc_type="FACEID").count(), 0)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class PdfExportTests(APITestCase):
+    """Week 2 Track C: docx -> PDF export via LibreOffice headless."""
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io_pdf", password="pw", role="IO", police_station="PS-Central")
+        self.case = Case.objects.create(
+            case_number="PDF-1", fir_number="FIR-PDF", fir_date="2026-06-01",
+            police_station="PS-Central", incident_narrative="Theft.", io=self.io,
+        )
+        Party.objects.create(case=self.case, role="ACCUSED", name="Ravi Kumar", parent_name="Mohan", address="12 MG Road")
+        self.client.force_authenticate(self.io)
+        self.url = reverse("case-generate-seizure", args=[self.case.id])
+
+    def test_format_pdf_produces_valid_pdf(self):
+        resp = self.client.post(self.url + "?format=pdf")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertTrue(resp.data["pdf_url"].endswith(".pdf"))
+        # Primary download follows the requested format.
+        self.assertEqual(resp.data["download_url"], resp.data["pdf_url"])
+
+        doc = Document.objects.get(case=self.case, doc_type="SEIZURE")
+        self.assertTrue(doc.pdf_file)
+        doc.pdf_file.open("rb")
+        try:
+            data = doc.pdf_file.read()
+        finally:
+            doc.pdf_file.close()
+        # A valid, non-empty PDF.
+        self.assertTrue(data.startswith(b"%PDF"))
+        self.assertGreater(len(data), 1000)
+
+    def test_default_generation_has_no_pdf(self):
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertIsNone(resp.data["pdf_url"])
+        self.assertTrue(resp.data["download_url"].endswith(".docx"))
+        doc = Document.objects.get(case=self.case, doc_type="SEIZURE")
+        self.assertFalse(doc.pdf_file)

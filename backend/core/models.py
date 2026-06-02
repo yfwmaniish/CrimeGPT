@@ -195,7 +195,8 @@ class Document(models.Model):
     ]
     case = models.ForeignKey(Case, related_name="documents", on_delete=models.CASCADE)
     doc_type = models.CharField(max_length=20, choices=DOC_TYPE)
-    file = models.FileField(upload_to="documents/")
+    file = models.FileField(upload_to="documents/")  # the .docx
+    pdf_file = models.FileField(upload_to="documents/", null=True, blank=True)  # optional PDF export
     version = models.IntegerField(default=1)
     generated_at = models.DateTimeField(auto_now_add=True)
 

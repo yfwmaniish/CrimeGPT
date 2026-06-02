@@ -7,10 +7,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 # System deps:
 #   libpq for psycopg2, build tools for any wheels that need compiling,
-#   libreoffice is added in a later week for PDF export (kept out for a slim Day 1 image).
+#   libreoffice-writer (+ fonts) for headless docx->PDF export (Track C).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
+        libreoffice-writer \
+        fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

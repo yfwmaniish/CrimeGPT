@@ -129,6 +129,10 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
+    # We don't use DRF format suffixes (?format=json). Disabling the override frees
+    # the `format` query param for our document export (?format=pdf), which would
+    # otherwise 404 via content negotiation.
+    "URL_FORMAT_OVERRIDE": None,
 }
 
 # --- CORS (Vite dev server) -------------------------------------------------

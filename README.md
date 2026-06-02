@@ -140,6 +140,15 @@ shared `_finalize_document`: versioned, IO/SHO-only, logs a `DiaryEvent`).
 Only **confirmed** `CaseSection`s ever reach a document. Word templates are built
 from code — regenerate with `python manage.py build_doc_templates`.
 
+**PDF export (Track C):** add `?format=pdf` to any generation endpoint to also
+render a PDF (LibreOffice headless) and store it on the `Document` alongside the
+`.docx`. The response then carries `docx_url`, `pdf_url`, and `download_url` (the
+PDF when `format=pdf`, else the docx):
+
+```
+POST /api/cases/{id}/documents/seizure/?format=pdf
+```
+
 Run the API tests:
 
 ```sh
