@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Third party
     "rest_framework",
+    "rest_framework.authtoken",
     "corsheaders",
     "simple_history",
     # Local
@@ -118,6 +119,9 @@ AUTH_USER_MODEL = "core.User"
 # --- Django REST Framework --------------------------------------------------
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        # Token auth for the React SPA (cross-origin, no CSRF dance);
+        # Session auth keeps the browsable API and admin usable.
+        "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [

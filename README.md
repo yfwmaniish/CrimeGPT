@@ -46,18 +46,34 @@ See [WEEK1_PLAN.md](WEEK1_PLAN.md) for the build plan and schema spec.
    docker compose exec web python manage.py createsuperuser
    ```
 
-## Frontend (Vite dev server)
+## Frontend — the Week 1 flow (Day 5)
 
-Runs outside Docker for fast HMR:
+The React app (Vite) implements the full vertical slice: **sign in → create a
+case with parties and seized items → Generate Seizure Receipt → download it**,
+with the returned version number and the new diary entry shown on screen.
 
 ```sh
+# 1. Create demo accounts (once):
+docker compose exec web python manage.py seed_demo_users
+# 2. Run the frontend:
 cd frontend
 cp .env.example .env.local   # optional; defaults to http://localhost:8000
 npm install
 npm run dev                  # http://localhost:5173
 ```
 
-The home page pings the backend `/api/health/` endpoint to confirm wiring.
+Open http://localhost:5173 and sign in with a demo account:
+
+| Username | Password   | Role | Can generate documents? |
+|----------|------------|------|--------------------------|
+| `io`     | `io12345`  | Investigating Officer | ✅ |
+| `sho`    | `sho12345` | Station House Officer  | ✅ |
+| `legal`  | `legal12345` | Legal Advisor        | ❌ (shows the clean 403 message) |
+
+**Auth:** the SPA uses DRF **token auth** — `POST /api/auth/login/` returns a
+token stored in `localStorage` and sent as `Authorization: Token …`. This avoids
+cross-origin session/CSRF complexity. Session auth still backs the admin and the
+browsable API.
 
 ## API (Day 2)
 
@@ -193,5 +209,13 @@ docker compose down -v         # stop + wipe the database volume
 - [x] 17 tests passing (adds 6: success, SHO allowed, version bump, diary,
       role-forbidden, unauthenticated)
 
-**Next (Day 5):** minimal React flow — create a case, add parties + seized
-items, click "Generate Seizure Receipt", download the file.
+**Day 5 — complete (Week 1 vertical slice done)**
+- [x] React: sign in (token auth), create a case with nested parties + seized
+      items (assembling `seized_from_index`), Generate Seizure Receipt → download
+- [x] Shows the document version and the new diary entry after generation
+- [x] Clean message on a 403 (disallowed role); `seed_demo_users` for accounts
+- [x] Backend: `/api/auth/login/` + `/api/auth/me/` token endpoints
+
+**Week 1 Definition of Done:** ✅ a non-technical user can open the app, create a
+case, add an accused and seized items, click one button, and download a filled
+`.docx` Seizure Receipt.

@@ -1,45 +1,60 @@
 import { useEffect, useState } from "react";
-import { getHealth, API_BASE } from "./api";
+import { getToken, logout as apiLogout, me } from "./api";
+import Login from "./Login";
+import CaseForm from "./CaseForm";
 import "./App.css";
 
 function App() {
-  const [status, setStatus] = useState("checking…");
-  const [error, setError] = useState(null);
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
+  // On load, if we have a stored token, restore the session.
   useEffect(() => {
-    getHealth()
-      .then((data) => setStatus(data.status))
-      .catch((err) => setError(err.message));
+    if (!getToken()) {
+      setLoading(false);
+      return;
+    }
+    me()
+      .then(setUser)
+      .catch(() => apiLogout())
+      .finally(() => setLoading(false));
   }, []);
+
+  function handleLogout() {
+    apiLogout();
+    setUser(null);
+  }
+
+  if (loading) {
+    return (
+      <main className="app narrow">
+        <p>Loading…</p>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return <Login onLoggedIn={setUser} />;
+  }
 
   return (
     <main className="app">
-      <h1>CrimeGPT</h1>
-      <p className="tagline">Investigation case management — Week 1 skeleton</p>
+      <header className="topbar">
+        <div>
+          <h1>CrimeGPT</h1>
+          <p className="tagline">New case → Seizure Receipt</p>
+        </div>
+        <div className="userbox">
+          <span>
+            {user.username} · <strong>{user.role_display || "no role"}</strong>
+          </span>
+          <button className="link-btn" onClick={handleLogout}>
+            Sign out
+          </button>
+        </div>
+      </header>
 
-      <section className="card">
-        <h2>Backend connection</h2>
-        {error ? (
-          <p className="bad">
-            ✗ Could not reach API at <code>{API_BASE}</code>
-            <br />
-            <small>{error}</small>
-          </p>
-        ) : (
-          <p className={status === "ok" ? "good" : ""}>
-            API status: <strong>{status}</strong> <small>({API_BASE})</small>
-          </p>
-        )}
-      </section>
-
-      <section className="card">
-        <h2>Coming next (Day 2–5)</h2>
-        <ul>
-          <li>Create / edit a case</li>
-          <li>Add parties and seized items</li>
-          <li>Generate &amp; download a Seizure Receipt</li>
-        </ul>
-      </section>
+      <CaseForm user={user} />
     </main>
   );
 }

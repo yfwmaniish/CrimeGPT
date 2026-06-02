@@ -1,18 +1,58 @@
 """DRF views for the core API."""
 import io
 
+from django.contrib.auth import authenticate
 from django.core.files.base import ContentFile
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 from rest_framework import status, viewsets
+from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
-from rest_framework.permissions import BasePermission, IsAuthenticated
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .documents import build_seizure_context_from_case, render_seizure_receipt
 from .models import Case, DiaryEvent, Document
 from .serializers import CaseSerializer
+
+
+def _user_payload(user):
+    return {
+        "username": user.username,
+        "role": user.role,
+        "role_display": user.get_role_display(),
+        "can_generate_documents": user.role in ("IO", "SHO"),
+    }
+
+
+class LoginView(APIView):
+    """Exchange username/password for a token (used by the React SPA)."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        user = authenticate(
+            request,
+            username=request.data.get("username"),
+            password=request.data.get("password"),
+        )
+        if user is None:
+            return Response(
+                {"detail": "Invalid username or password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({"token": token.key, **_user_payload(user)})
+
+
+class MeView(APIView):
+    """Return the current user (lets the SPA restore session from a stored token)."""
+
+    def get(self, request):
+        return Response(_user_payload(request.user))
 
 
 class CanGenerateDocuments(BasePermission):
@@ -77,7 +117,7 @@ class CaseViewSet(viewsets.ModelViewSet):
             )
             document.save()
 
-            DiaryEvent.objects.create(
+            event = DiaryEvent.objects.create(
                 case=case,
                 timestamp=timezone.now(),
                 event_type="DOCUMENT_GENERATED",
@@ -92,6 +132,13 @@ class CaseViewSet(viewsets.ModelViewSet):
                 "version": document.version,
                 "download_url": request.build_absolute_uri(document.file.url),
                 "generated_at": document.generated_at,
+                "diary_event": {
+                    "id": event.id,
+                    "event_type": event.event_type,
+                    "description": event.description,
+                    "timestamp": event.timestamp,
+                    "actor": event.actor.username if event.actor else None,
+                },
             },
             status=status.HTTP_201_CREATED,
         )
