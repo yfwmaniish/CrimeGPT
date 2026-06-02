@@ -114,16 +114,32 @@ def render_seizure_receipt(context: dict, template_path: Path = SEIZURE_TEMPLATE
     return tpl
 
 
+def resolve_seized_from_person(case):
+    """The person named in the receipt's narrative/signature as the one items
+    were seized from. Prefer the first ACCUSED party; if the case has none, fall
+    back to the party the seized items were actually taken from (the first item
+    with a ``seized_from``). Returns a Party or None.
+    """
+    accused = case.parties.filter(role="ACCUSED").first()
+    if accused is not None:
+        return accused
+    for item in case.seized_items.all():
+        if item.seized_from_id:
+            return item.seized_from
+    return None
+
+
 def build_seizure_context_from_case(case) -> dict:
-    """Map a Case (+ accused Party, SeizedItems, seizing officer) to the template
-    context. The seizing officer is the case's IO; the first ACCUSED party is the
-    person the items were seized from on the receipt. Missing pieces render blank.
+    """Map a Case (+ the seized-from person, SeizedItems, seizing officer) to the
+    template context. The seizing officer is the case's IO. The person the items
+    were seized from is resolved by ``resolve_seized_from_person`` and feeds both
+    the narrative line and the signature line. Missing pieces render blank.
     """
 
     def fmt_date(d):
         return d.strftime("%d-%m-%Y") if d else ""
 
-    accused = case.parties.filter(role="ACCUSED").first()
+    person = resolve_seized_from_person(case)
     officer = case.io
 
     items = [
@@ -156,9 +172,9 @@ def build_seizure_context_from_case(case) -> dict:
             "police_station": officer.police_station if officer else "",
         },
         "accused": {
-            "name": accused.name if accused else "",
-            "parent_name": accused.parent_name if accused else "",
-            "address": accused.address if accused else "",
+            "name": person.name if person else "",
+            "parent_name": person.parent_name if person else "",
+            "address": person.address if person else "",
         },
         "seized_items": items,
         "witnesses": witnesses,

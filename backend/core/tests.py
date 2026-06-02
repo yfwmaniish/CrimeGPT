@@ -384,3 +384,76 @@ class SeizureGenerationAPITests(APITestCase):
         resp = self.client.post(self.url)
         self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
         self.assertEqual(Document.objects.filter(case=self.case).count(), 0)
+
+
+class SeizureContextMappingTests(TestCase):
+    """Day-5 fix: the seized-from person must appear in the narrative AND
+    signature lines, not only in the items table."""
+
+    def _paragraph_and_table_text(self, case):
+        """Render and return (paragraph_text, table_text) separately.
+
+        The narrative and signature are *paragraphs*; the items table is *table
+        cells*. python-docx keeps these separate, so asserting against the
+        paragraph text alone proves the name reached the narrative/signature.
+        """
+        from io import BytesIO
+
+        from docx import Document as Docx
+
+        from core.documents import build_seizure_context_from_case, render_seizure_receipt
+
+        tpl = render_seizure_receipt(build_seizure_context_from_case(case))
+        buf = BytesIO()
+        tpl.save(buf)
+        buf.seek(0)
+        doc = Docx(buf)
+        paragraph_text = "\n".join(p.text for p in doc.paragraphs)
+        table_text = "\n".join(
+            c.text for t in doc.tables for r in t.rows for c in r.cells
+        )
+        return paragraph_text, table_text
+
+    def _make_case(self, number):
+        io = User.objects.create_user(username=f"io_{number}", password="pw", role="IO")
+        return Case.objects.create(
+            case_number=number, fir_number="FIR-1", fir_date="2026-06-01",
+            police_station="PS-Central", incident_place="Market Road", io=io,
+        )
+
+    def test_accused_name_in_narrative_and_signature(self):
+        case = self._make_case("MAP-1")
+        accused = Party.objects.create(
+            case=case, role="ACCUSED", name="Ravi Kumar",
+            parent_name="Mohan Kumar", address="12 MG Road",
+        )
+        SeizedItem.objects.create(case=case, description="Phone", seized_from=accused)
+
+        paragraphs, _ = self._paragraph_and_table_text(case)
+        # Name, parent and address all reach the narrative/signature paragraphs.
+        self.assertIn("Ravi Kumar", paragraphs)
+        self.assertIn("Mohan Kumar", paragraphs)
+        self.assertIn("12 MG Road", paragraphs)
+        # And specifically the narrative + signature lines, not a blank fragment.
+        self.assertIn("seized the following article(s)", paragraphs)
+        self.assertNotIn("from , child/spouse of , resident of :", paragraphs)
+        self.assertNotIn("from whom seized: __________________  ()", paragraphs)
+
+    def test_falls_back_to_seized_from_when_no_accused(self):
+        """No ACCUSED party: the person items were seized from should be named."""
+        case = self._make_case("MAP-2")
+        victim = Party.objects.create(
+            case=case, role="VICTIM", name="Asha Devi",
+            parent_name="Ram Devi", address="9 Lake View",
+        )
+        SeizedItem.objects.create(case=case, description="Bag", seized_from=victim)
+        self.assertFalse(case.parties.filter(role="ACCUSED").exists())
+
+        paragraphs, table = self._paragraph_and_table_text(case)
+        # The fallback person appears in the narrative/signature paragraphs...
+        self.assertIn("Asha Devi", paragraphs)
+        self.assertIn("Ram Devi", paragraphs)
+        self.assertIn("9 Lake View", paragraphs)
+        # ...not merely in the items table.
+        self.assertIn("Asha Devi", table)
+        self.assertNotIn("from , child/spouse of , resident of :", paragraphs)
