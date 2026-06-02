@@ -14,8 +14,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .documents import (
+    build_court_custody_context_from_case,
     build_remand_context_from_case,
     build_seizure_context_from_case,
+    render_court_custody_letter,
     render_remand_request,
     render_seizure_receipt,
 )
@@ -172,6 +174,26 @@ class CaseViewSet(viewsets.ModelViewSet):
             request, case,
             doc_type="REMAND", label="Remand Request",
             filename_prefix="remand_request", rendered=rendered,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="documents/custody",
+        url_name="generate-custody",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def generate_custody(self, request, pk=None):
+        """Generate (or regenerate, versioned) the Court (Judicial) Custody Letter.
+
+        Pulls only CONFIRMED sections.
+        """
+        case = self.get_object()
+        rendered = render_court_custody_letter(build_court_custody_context_from_case(case))
+        return self._finalize_document(
+            request, case,
+            doc_type="CUSTODY", label="Court Custody Letter",
+            filename_prefix="court_custody_letter", rendered=rendered,
         )
 
     @action(

@@ -23,6 +23,7 @@ from docxtpl import DocxTemplate
 DOC_TEMPLATE_DIR = Path(settings.BASE_DIR) / "core" / "doc_templates"
 SEIZURE_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "seizure_receipt.docx"
 REMAND_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "remand_request.docx"
+COURT_CUSTODY_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "court_custody_letter.docx"
 
 # Columns of the seized-items table: (header label, per-row Jinja tag).
 _ITEM_COLUMNS = [
@@ -347,4 +348,103 @@ def build_remand_context_from_case(case) -> dict:
             "date": arrest_event.timestamp.strftime("%d-%m-%Y %H:%M") if arrest_event else "",
             "details": arrest_event.description if arrest_event else "",
         },
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Court Custody Letter (judicial custody)
+# --------------------------------------------------------------------------- #
+def build_court_custody_template(path: Path = COURT_CUSTODY_TEMPLATE_PATH) -> Path:
+    """Create the Court (Judicial) Custody Letter .docx template."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = Document()
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title.add_run("REQUEST FOR JUDICIAL (COURT) CUSTODY")
+    run.bold = True
+    run.font.size = Pt(15)
+
+    doc.add_paragraph("To,")
+    doc.add_paragraph("The Hon'ble Judicial Magistrate,")
+
+    meta = doc.add_paragraph()
+    meta.add_run("Police Station: ").bold = True
+    meta.add_run("{{ case.police_station }}    ")
+    meta.add_run("FIR No.: ").bold = True
+    meta.add_run("{{ case.fir_number }}    ")
+    meta.add_run("Case No.: ").bold = True
+    meta.add_run("{{ case.case_number }}")
+
+    datep = doc.add_paragraph()
+    datep.add_run("Date: ").bold = True
+    datep.add_run("{{ today }}")
+
+    # Confirmed sections only (provided by the context).
+    doc.add_paragraph(
+        "The above case is registered at Police Station {{ case.police_station }} "
+        "vide FIR No. {{ case.fir_number }} dated {{ case.fir_date }}, under the "
+        "following section(s): {% for s in sections %}{{ s.code }} "
+        "{{ s.section_number }} ({{ s.title }}){% if not loop.last %}; "
+        "{% endif %}{% endfor %}."
+    )
+    doc.add_paragraph(
+        "The accused {{ accused.name }}, child/spouse of {{ accused.parent_name }}, "
+        "resident of {{ accused.address }}, is produced before the Hon'ble Court."
+    )
+    doc.add_paragraph(
+        "Police custody of the accused is not required at this stage. It is "
+        "therefore prayed that the accused may be remanded to judicial custody."
+    )
+
+    doc.add_paragraph()  # spacer
+    sig = doc.add_paragraph()
+    sig.add_run("Signature of Investigating Officer: __________________  ")
+    sig.add_run("({{ officer.name }}, {{ officer.role }})")
+
+    doc.save(str(path))
+    return path
+
+
+def render_court_custody_letter(context: dict, template_path: Path = COURT_CUSTODY_TEMPLATE_PATH) -> DocxTemplate:
+    """Render the Court Custody Letter template with ``context``."""
+    tpl = DocxTemplate(str(template_path))
+    tpl.render(context)
+    return tpl
+
+
+def build_court_custody_context_from_case(case) -> dict:
+    """Map a Case (+ accused, confirmed CaseSections) to the Court Custody
+    Letter context. Only confirmed sections are included.
+    """
+
+    def fmt_date(d):
+        return d.strftime("%d-%m-%Y") if d else ""
+
+    accused = case.parties.filter(role="ACCUSED").first()
+    officer = case.io
+
+    return {
+        "today": timezone.localdate().strftime("%d-%m-%Y"),
+        "case": {
+            "case_number": case.case_number,
+            "fir_number": case.fir_number,
+            "fir_date": fmt_date(case.fir_date),
+            "police_station": case.police_station,
+            "incident_place": case.incident_place,
+            "incident_narrative": case.incident_narrative,
+        },
+        "officer": {
+            "name": (officer.get_full_name() or officer.username) if officer else "",
+            "role": officer.get_role_display() if (officer and officer.role) else "",
+            "police_station": officer.police_station if officer else "",
+        },
+        "accused": {
+            "name": accused.name if accused else "",
+            "parent_name": accused.parent_name if accused else "",
+            "address": accused.address if accused else "",
+        },
+        "sections": confirmed_sections(case),
     }

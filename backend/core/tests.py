@@ -689,3 +689,84 @@ class RemandRequestTests(APITestCase):
         resp = self.client.post(self.url)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(Document.objects.filter(case=self.case, doc_type="REMAND").count(), 0)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class CourtCustodyLetterTests(APITestCase):
+    """Week 2 Track B: Court (Judicial) Custody Letter."""
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io_cc", password="pw", role="IO", police_station="PS-Central")
+        self.legal = User.objects.create_user(username="legal_cc", password="pw", role="LEGAL")
+        self.case = Case.objects.create(
+            case_number="CC-1", fir_number="FIR-CC", fir_date="2026-06-01",
+            police_station="PS-Central", status="ARREST",
+            incident_narrative="Accused broke into the dwelling and stole jewellery.",
+            io=self.io,
+        )
+        Party.objects.create(
+            case=self.case, role="ACCUSED", name="Ravi Kumar",
+            parent_name="Mohan Kumar", address="12 MG Road",
+        )
+        self.confirmed_sec = LegalSection.objects.create(
+            code="BNS", section_number="305", title="Theft in a dwelling house.", text="...")
+        self.unconfirmed_sec = LegalSection.objects.create(
+            code="BNS", section_number="318", title="Cheating.", text="...")
+        CaseSection.objects.create(case=self.case, section=self.confirmed_sec, suggested_by_ai=True, confirmed=True)
+        CaseSection.objects.create(case=self.case, section=self.unconfirmed_sec, suggested_by_ai=True, confirmed=False)
+        self.url = reverse("case-generate-custody", args=[self.case.id])
+
+    def _paragraph_text(self, case):
+        from io import BytesIO
+
+        from docx import Document as Docx
+
+        from core.documents import (
+            build_court_custody_context_from_case,
+            render_court_custody_letter,
+        )
+
+        case.refresh_from_db()  # ensure fir_date is a real date (as get_object() yields)
+        tpl = render_court_custody_letter(build_court_custody_context_from_case(case))
+        buf = BytesIO()
+        tpl.save(buf)
+        buf.seek(0)
+        return "\n".join(p.text for p in Docx(buf).paragraphs)
+
+    def test_render_lands_real_data_and_only_confirmed_sections(self):
+        text = self._paragraph_text(self.case)
+        self.assertIn("Ravi Kumar", text)
+        self.assertIn("Mohan Kumar", text)
+        self.assertIn("12 MG Road", text)
+        # Confirmed section present...
+        self.assertIn("305", text)
+        self.assertIn("Theft in a dwelling house", text)
+        # ...unconfirmed section absent (load-bearing boundary).
+        self.assertNotIn("318", text)
+        self.assertNotIn("Cheating", text)
+        # No unrendered Jinja.
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
+
+    def test_io_generates_versioned_with_diary(self):
+        self.client.force_authenticate(self.io)
+        r1 = self.client.post(self.url)
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED, r1.data)
+        self.assertEqual(r1.data["doc_type"], "CUSTODY")
+        self.assertEqual(r1.data["version"], 1)
+        self.assertTrue(r1.data["download_url"].endswith(".docx"))
+
+        r2 = self.client.post(self.url)  # regenerate -> v2
+        self.assertEqual(r2.data["version"], 2)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="CUSTODY").count(), 2)
+
+        events = self.case.diary.filter(event_type="DOCUMENT_GENERATED")
+        self.assertEqual(events.count(), 2)
+        self.assertIn("Court Custody Letter", events.first().description)
+        self.assertEqual(events.first().actor, self.io)
+
+    def test_legal_advisor_forbidden(self):
+        self.client.force_authenticate(self.legal)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="CUSTODY").count(), 0)
