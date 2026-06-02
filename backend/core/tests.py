@@ -599,3 +599,93 @@ class LegalRetrievalTests(APITestCase):
         self.case.save()
         resp = self.client.post(self.url, format="json")
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class RemandRequestTests(APITestCase):
+    """Week 2 Track B: Police-Custody Remand Request."""
+
+    def setUp(self):
+        from django.utils import timezone
+
+        self.io = User.objects.create_user(username="io_rem", password="pw", role="IO", police_station="PS-Central")
+        self.legal = User.objects.create_user(username="legal_rem", password="pw", role="LEGAL")
+        self.case = Case.objects.create(
+            case_number="REM-1", fir_number="FIR-REM", fir_date="2026-06-01",
+            police_station="PS-Central", status="ARREST",
+            incident_narrative="Accused broke into the dwelling and stole jewellery.",
+            io=self.io,
+        )
+        Party.objects.create(
+            case=self.case, role="ACCUSED", name="Ravi Kumar",
+            parent_name="Mohan Kumar", address="12 MG Road",
+        )
+        # One CONFIRMED section and one AI-suggested-but-UNCONFIRMED section.
+        self.confirmed_sec = LegalSection.objects.create(
+            code="BNS", section_number="305", title="Theft in a dwelling house.", text="...")
+        self.unconfirmed_sec = LegalSection.objects.create(
+            code="BNS", section_number="318", title="Cheating.", text="...")
+        CaseSection.objects.create(case=self.case, section=self.confirmed_sec, suggested_by_ai=True, confirmed=True)
+        CaseSection.objects.create(case=self.case, section=self.unconfirmed_sec, suggested_by_ai=True, confirmed=False)
+        # Arrest diary event (source of arrest details).
+        DiaryEvent.objects.create(
+            case=self.case, timestamp=timezone.make_aware(__import__("datetime").datetime(2026, 6, 2, 9, 30)),
+            event_type="ARREST", description="Accused arrested at the railway station.", actor=self.io,
+        )
+        self.url = reverse("case-generate-remand", args=[self.case.id])
+
+    def _paragraph_text(self, case):
+        from io import BytesIO
+
+        from docx import Document as Docx
+
+        from core.documents import build_remand_context_from_case, render_remand_request
+
+        case.refresh_from_db()  # ensure fir_date is a real date (as get_object() yields)
+        tpl = render_remand_request(build_remand_context_from_case(case))
+        buf = BytesIO()
+        tpl.save(buf)
+        buf.seek(0)
+        return "\n".join(p.text for p in Docx(buf).paragraphs)
+
+    def test_render_lands_real_data_and_only_confirmed_sections(self):
+        text = self._paragraph_text(self.case)
+        # Accused details in the narrative/signature paragraphs.
+        self.assertIn("Ravi Kumar", text)
+        self.assertIn("Mohan Kumar", text)
+        self.assertIn("12 MG Road", text)
+        # Confirmed section is present...
+        self.assertIn("305", text)
+        self.assertIn("Theft in a dwelling house", text)
+        # ...and the UNCONFIRMED section is NOT (load-bearing boundary).
+        self.assertNotIn("318", text)
+        self.assertNotIn("Cheating", text)
+        # Arrest details from the diary event.
+        self.assertIn("railway station", text)
+        self.assertIn("02-06-2026", text)
+        # No unrendered Jinja.
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
+
+    def test_io_generates_versioned_with_diary(self):
+        self.client.force_authenticate(self.io)
+        r1 = self.client.post(self.url)
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED, r1.data)
+        self.assertEqual(r1.data["doc_type"], "REMAND")
+        self.assertEqual(r1.data["version"], 1)
+        self.assertTrue(r1.data["download_url"].endswith(".docx"))
+
+        r2 = self.client.post(self.url)  # regenerate -> v2, not overwritten
+        self.assertEqual(r2.data["version"], 2)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="REMAND").count(), 2)
+
+        events = self.case.diary.filter(event_type="DOCUMENT_GENERATED")
+        self.assertEqual(events.count(), 2)
+        self.assertIn("Remand Request", events.first().description)
+        self.assertEqual(events.first().actor, self.io)
+
+    def test_legal_advisor_forbidden(self):
+        self.client.force_authenticate(self.legal)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="REMAND").count(), 0)

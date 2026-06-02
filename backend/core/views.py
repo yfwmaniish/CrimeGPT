@@ -13,7 +13,12 @@ from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .documents import build_seizure_context_from_case, render_seizure_receipt
+from .documents import (
+    build_remand_context_from_case,
+    build_seizure_context_from_case,
+    render_remand_request,
+    render_seizure_receipt,
+)
 from .models import Case, CaseSection, DiaryEvent, Document, LegalSection
 from .serializers import CaseSerializer
 
@@ -81,27 +86,16 @@ class CaseViewSet(viewsets.ModelViewSet):
         .all()
     )
 
-    @action(
-        detail=True,
-        methods=["post"],
-        url_path="documents/seizure",
-        url_name="generate-seizure",
-        permission_classes=[IsAuthenticated, CanGenerateDocuments],
-    )
-    def generate_seizure(self, request, pk=None):
-        """Generate (or regenerate, with an incremented version) the Seizure
-        Receipt for this case, log a diary event, and return a download URL."""
-        case = self.get_object()
-
-        # Render the document from case data.
-        context = build_seizure_context_from_case(case)
-        rendered = render_seizure_receipt(context)
+    def _finalize_document(self, request, case, *, doc_type, label, filename_prefix, rendered):
+        """Shared generation tail: version (never overwrite), save the Document,
+        log a DiaryEvent, return the standard response. Used by every document
+        endpoint so versioning + audit logic lives in one place.
+        """
         buffer = io.BytesIO()
         rendered.save(buffer)
 
-        # Never overwrite an existing receipt — bump the version instead.
         last_version = (
-            Document.objects.filter(case=case, doc_type="SEIZURE").aggregate(
+            Document.objects.filter(case=case, doc_type=doc_type).aggregate(
                 m=Max("version")
             )["m"]
             or 0
@@ -109,9 +103,9 @@ class CaseViewSet(viewsets.ModelViewSet):
         version = last_version + 1
 
         with transaction.atomic():
-            document = Document(case=case, doc_type="SEIZURE", version=version)
+            document = Document(case=case, doc_type=doc_type, version=version)
             document.file.save(
-                f"seizure_receipt_case{case.id}_v{version}.docx",
+                f"{filename_prefix}_case{case.id}_v{version}.docx",
                 ContentFile(buffer.getvalue()),
                 save=False,
             )
@@ -121,7 +115,7 @@ class CaseViewSet(viewsets.ModelViewSet):
                 case=case,
                 timestamp=timezone.now(),
                 event_type="DOCUMENT_GENERATED",
-                description=f"Seizure Receipt (version {version}) generated.",
+                description=f"{label} (version {version}) generated.",
                 actor=request.user,
             )
 
@@ -141,6 +135,43 @@ class CaseViewSet(viewsets.ModelViewSet):
                 },
             },
             status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="documents/seizure",
+        url_name="generate-seizure",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def generate_seizure(self, request, pk=None):
+        """Generate (or regenerate, versioned) the Seizure Receipt for this case."""
+        case = self.get_object()
+        rendered = render_seizure_receipt(build_seizure_context_from_case(case))
+        return self._finalize_document(
+            request, case,
+            doc_type="SEIZURE", label="Seizure Receipt",
+            filename_prefix="seizure_receipt", rendered=rendered,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="documents/remand",
+        url_name="generate-remand",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def generate_remand(self, request, pk=None):
+        """Generate (or regenerate, versioned) the Police-Custody Remand Request.
+
+        Pulls only CONFIRMED sections and the latest ARREST diary event.
+        """
+        case = self.get_object()
+        rendered = render_remand_request(build_remand_context_from_case(case))
+        return self._finalize_document(
+            request, case,
+            doc_type="REMAND", label="Remand Request",
+            filename_prefix="remand_request", rendered=rendered,
         )
 
     @action(

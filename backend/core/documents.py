@@ -22,6 +22,7 @@ from docxtpl import DocxTemplate
 
 DOC_TEMPLATE_DIR = Path(settings.BASE_DIR) / "core" / "doc_templates"
 SEIZURE_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "seizure_receipt.docx"
+REMAND_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "remand_request.docx"
 
 # Columns of the seized-items table: (header label, per-row Jinja tag).
 _ITEM_COLUMNS = [
@@ -223,4 +224,127 @@ def sample_seizure_context() -> dict:
             {"name": "Sunil Verma", "address": "5 Nehru Road"},
             {"name": "Asha Devi", "address": "9 Patel Street"},
         ],
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Remand Request (Police Custody)
+# --------------------------------------------------------------------------- #
+def build_remand_request_template(path: Path = REMAND_TEMPLATE_PATH) -> Path:
+    """Create the Police-Custody Remand Request .docx template."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = Document()
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title.add_run("REQUEST FOR POLICE CUSTODY REMAND")
+    run.bold = True
+    run.font.size = Pt(15)
+
+    doc.add_paragraph("To,")
+    doc.add_paragraph("The Hon'ble Judicial Magistrate,")
+
+    meta = doc.add_paragraph()
+    meta.add_run("Police Station: ").bold = True
+    meta.add_run("{{ case.police_station }}    ")
+    meta.add_run("FIR No.: ").bold = True
+    meta.add_run("{{ case.fir_number }}    ")
+    meta.add_run("Case No.: ").bold = True
+    meta.add_run("{{ case.case_number }}")
+
+    datep = doc.add_paragraph()
+    datep.add_run("Date: ").bold = True
+    datep.add_run("{{ today }}")
+
+    # Confirmed sections only (the context provides confirmed CaseSections).
+    doc.add_paragraph(
+        "The above case is registered at Police Station {{ case.police_station }} "
+        "vide FIR No. {{ case.fir_number }} dated {{ case.fir_date }}, under the "
+        "following section(s): {% for s in sections %}{{ s.code }} "
+        "{{ s.section_number }} ({{ s.title }}){% if not loop.last %}; "
+        "{% endif %}{% endfor %}."
+    )
+    doc.add_paragraph(
+        "The accused {{ accused.name }}, child/spouse of {{ accused.parent_name }}, "
+        "resident of {{ accused.address }}, was arrested on {{ arrest.date }}. "
+        "{{ arrest.details }}"
+    )
+    doc.add_paragraph("Brief facts of the case: {{ case.incident_narrative }}")
+    doc.add_paragraph(
+        "It is necessary to interrogate the accused in police custody for the "
+        "purpose of investigation and recovery. It is therefore prayed that the "
+        "accused may be remanded to police custody for a period of ______ days."
+    )
+
+    doc.add_paragraph()  # spacer
+    sig = doc.add_paragraph()
+    sig.add_run("Signature of Investigating Officer: __________________  ")
+    sig.add_run("({{ officer.name }}, {{ officer.role }})")
+
+    doc.save(str(path))
+    return path
+
+
+def render_remand_request(context: dict, template_path: Path = REMAND_TEMPLATE_PATH) -> DocxTemplate:
+    """Render the Remand Request template with ``context``."""
+    tpl = DocxTemplate(str(template_path))
+    tpl.render(context)
+    return tpl
+
+
+def confirmed_sections(case) -> list:
+    """The case's CONFIRMED legal sections, as plain dicts. Never includes
+    AI-suggested-but-unconfirmed sections — that boundary is load-bearing.
+    """
+    return [
+        {
+            "code": cs.section.code,
+            "section_number": cs.section.section_number,
+            "title": cs.section.title,
+            "ipc_equivalent": cs.section.ipc_equivalent,
+        }
+        for cs in case.applied_sections.filter(confirmed=True).select_related("section")
+    ]
+
+
+def build_remand_context_from_case(case) -> dict:
+    """Map a Case (+ accused, confirmed CaseSections, arrest details) to the
+    Remand Request context. Arrest details come from the latest ARREST diary
+    event. Only confirmed sections are included.
+    """
+
+    def fmt_date(d):
+        return d.strftime("%d-%m-%Y") if d else ""
+
+    accused = case.parties.filter(role="ACCUSED").first()
+    officer = case.io
+    arrest_event = case.diary.filter(event_type="ARREST").order_by("-timestamp").first()
+
+    return {
+        "today": timezone.localdate().strftime("%d-%m-%Y"),
+        "case": {
+            "case_number": case.case_number,
+            "fir_number": case.fir_number,
+            "fir_date": fmt_date(case.fir_date),
+            "police_station": case.police_station,
+            "incident_place": case.incident_place,
+            "incident_narrative": case.incident_narrative,
+        },
+        "officer": {
+            "name": (officer.get_full_name() or officer.username) if officer else "",
+            "role": officer.get_role_display() if (officer and officer.role) else "",
+            "police_station": officer.police_station if officer else "",
+        },
+        "accused": {
+            "name": accused.name if accused else "",
+            "parent_name": accused.parent_name if accused else "",
+            "address": accused.address if accused else "",
+        },
+        "sections": confirmed_sections(case),
+        "arrest": {
+            "date": arrest_event.timestamp.strftime("%d-%m-%Y %H:%M") if arrest_event else "",
+            "details": arrest_event.description if arrest_event else "",
+        },
     }
