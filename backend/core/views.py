@@ -14,10 +14,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .documents import (
+    build_chargesheet_context_from_case,
     build_court_custody_context_from_case,
     build_medical_context_from_case,
     build_remand_context_from_case,
     build_seizure_context_from_case,
+    render_chargesheet,
     render_court_custody_letter,
     render_medical_treatment_letter,
     render_remand_request,
@@ -216,6 +218,26 @@ class CaseViewSet(viewsets.ModelViewSet):
             request, case,
             doc_type="MEDICAL", label="Medical Treatment Letter",
             filename_prefix="medical_treatment_letter", rendered=rendered,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="documents/chargesheet",
+        url_name="generate-chargesheet",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def generate_chargesheet(self, request, pk=None):
+        """Generate (or regenerate, versioned) the Purvani Chargesheet — the
+        superset document (all parties, confirmed sections, seized items,
+        statements, and a diary summary).
+        """
+        case = self.get_object()
+        rendered = render_chargesheet(build_chargesheet_context_from_case(case))
+        return self._finalize_document(
+            request, case,
+            doc_type="CHARGESHEET", label="Purvani Chargesheet",
+            filename_prefix="purvani_chargesheet", rendered=rendered,
         )
 
     @action(

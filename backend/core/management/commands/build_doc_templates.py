@@ -2,6 +2,7 @@
 from django.core.management.base import BaseCommand
 
 from core.documents import (
+    build_chargesheet_template,
     build_court_custody_template,
     build_medical_treatment_template,
     build_remand_request_template,
@@ -13,6 +14,7 @@ BUILDERS = [
     ("Remand Request", build_remand_request_template),
     ("Court Custody Letter", build_court_custody_template),
     ("Medical Treatment Letter", build_medical_treatment_template),
+    ("Purvani Chargesheet", build_chargesheet_template),
 ]
 
 

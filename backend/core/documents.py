@@ -25,6 +25,7 @@ SEIZURE_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "seizure_receipt.docx"
 REMAND_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "remand_request.docx"
 COURT_CUSTODY_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "court_custody_letter.docx"
 MEDICAL_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "medical_treatment_letter.docx"
+CHARGESHEET_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "purvani_chargesheet.docx"
 
 # Columns of the seized-items table: (header label, per-row Jinja tag).
 _ITEM_COLUMNS = [
@@ -41,6 +42,24 @@ def _set_cell(cell, text, *, bold=False):
     cell.text = ""
     run = cell.paragraphs[0].add_run(text)
     run.bold = bold
+
+
+def _add_loop_table(doc, columns, loop_expr):
+    """Add a docxtpl table whose body row repeats over ``loop_expr``.
+
+    docxtpl deletes the rows holding ``{%tr for ... %}`` and ``{%tr endfor %}``
+    and repeats the rows *between* them, so the layout must be exactly four rows:
+    header, for-control, body (repeats), endfor (the Day-3 bug was a missing body
+    row). ``columns`` is a list of ``(header_label, body_cell_tag)``.
+    """
+    table = doc.add_table(rows=4, cols=len(columns))
+    table.style = "Table Grid"
+    for col, (header, tag) in enumerate(columns):
+        _set_cell(table.rows[0].cells[col], header, bold=True)  # header
+        _set_cell(table.rows[2].cells[col], tag)                # body (repeats)
+    _set_cell(table.rows[1].cells[0], "{%tr " + loop_expr + " %}")
+    _set_cell(table.rows[3].cells[0], "{%tr endfor %}")
+    return table
 
 
 def build_seizure_receipt_template(path: Path = SEIZURE_TEMPLATE_PATH) -> Path:
@@ -549,4 +568,207 @@ def build_medical_context_from_case(case) -> dict:
             "address": subject.address if subject else "",
             "role": subject.get_role_display() if subject else "",
         },
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Purvani Chargesheet (the superset — everything about the case)
+# --------------------------------------------------------------------------- #
+def _add_section_heading(doc, text):
+    p = doc.add_paragraph()
+    run = p.add_run(text)
+    run.bold = True
+    return p
+
+
+def build_chargesheet_template(path: Path = CHARGESHEET_TEMPLATE_PATH) -> Path:
+    """Create the Purvani Chargesheet .docx template.
+
+    Has four repeating tables (parties, sections, seized items, statements) plus
+    a diary table — each built with the proven 4-row loop layout.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = Document()
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title.add_run("POLICE REPORT UNDER SECTION 193 BNSS (PURVANI CHARGESHEET)")
+    run.bold = True
+    run.font.size = Pt(14)
+
+    meta = doc.add_paragraph()
+    meta.add_run("Police Station: ").bold = True
+    meta.add_run("{{ case.police_station }}    ")
+    meta.add_run("FIR No.: ").bold = True
+    meta.add_run("{{ case.fir_number }}    ")
+    meta.add_run("FIR Date: ").bold = True
+    meta.add_run("{{ case.fir_date }}")
+
+    meta2 = doc.add_paragraph()
+    meta2.add_run("Case No.: ").bold = True
+    meta2.add_run("{{ case.case_number }}    ")
+    meta2.add_run("Status: ").bold = True
+    meta2.add_run("{{ case.status }}    ")
+    meta2.add_run("Date: ").bold = True
+    meta2.add_run("{{ today }}")
+
+    doc.add_paragraph("Place of incident: {{ case.incident_place }}")
+
+    _add_section_heading(doc, "1. Parties")
+    _add_loop_table(
+        doc,
+        [
+            ("Role", "{{ p.role }}"),
+            ("Name", "{{ p.name }}"),
+            ("Father's/Husband's Name", "{{ p.parent_name }}"),
+            ("Age", "{{ p.age }}"),
+            ("Gender", "{{ p.gender }}"),
+            ("Address", "{{ p.address }}"),
+        ],
+        "for p in parties",
+    )
+
+    _add_section_heading(doc, "2. Sections Applied (confirmed)")
+    _add_loop_table(
+        doc,
+        [
+            ("Code", "{{ s.code }}"),
+            ("Section", "{{ s.section_number }}"),
+            ("Title", "{{ s.title }}"),
+            ("IPC Equivalent", "{{ s.ipc_equivalent }}"),
+        ],
+        "for s in sections",
+    )
+
+    _add_section_heading(doc, "3. Seized Items")
+    _add_loop_table(
+        doc,
+        [
+            ("S.No", "{{ item.sno }}"),
+            ("Description", "{{ item.description }}"),
+            ("Quantity", "{{ item.quantity }}"),
+            ("Seized From", "{{ item.seized_from }}"),
+            ("Date", "{{ item.seizure_date }}"),
+            ("Place", "{{ item.seizure_place }}"),
+        ],
+        "for item in seized_items",
+    )
+
+    _add_section_heading(doc, "4. Statements Recorded")
+    _add_loop_table(
+        doc,
+        [
+            ("Deponent", "{{ st.party }}"),
+            ("Date", "{{ st.recorded_date }}"),
+            ("Statement", "{{ st.text }}"),
+        ],
+        "for st in statements",
+    )
+
+    _add_section_heading(doc, "5. Case Diary Summary")
+    _add_loop_table(
+        doc,
+        [
+            ("Date/Time", "{{ ev.timestamp }}"),
+            ("Event", "{{ ev.event_type }}"),
+            ("Description", "{{ ev.description }}"),
+        ],
+        "for ev in diary",
+    )
+
+    _add_section_heading(doc, "6. Brief Facts")
+    doc.add_paragraph("{{ case.incident_narrative }}")
+
+    doc.add_paragraph()  # spacer
+    sig = doc.add_paragraph()
+    sig.add_run("Signature of Investigating Officer: __________________  ")
+    sig.add_run("({{ officer.name }}, {{ officer.role }})")
+
+    doc.save(str(path))
+    return path
+
+
+def render_chargesheet(context: dict, template_path: Path = CHARGESHEET_TEMPLATE_PATH) -> DocxTemplate:
+    """Render the Purvani Chargesheet template with ``context``."""
+    tpl = DocxTemplate(str(template_path))
+    tpl.render(context)
+    return tpl
+
+
+def build_chargesheet_context_from_case(case) -> dict:
+    """Map a Case to the chargesheet context: all parties, confirmed sections,
+    all seized items, all statements, and a diary summary. Only CONFIRMED
+    sections are included.
+    """
+
+    def fmt_date(d):
+        return d.strftime("%d-%m-%Y") if d else ""
+
+    def fmt_dt(dt):
+        return dt.strftime("%d-%m-%Y %H:%M") if dt else ""
+
+    officer = case.io
+
+    parties = [
+        {
+            "role": p.get_role_display(),
+            "name": p.name,
+            "parent_name": p.parent_name,
+            "age": p.age if p.age is not None else "",
+            "gender": p.gender,
+            "address": p.address,
+        }
+        for p in case.parties.all()
+    ]
+    seized_items = [
+        {
+            "sno": i,
+            "description": item.description,
+            "quantity": item.quantity,
+            "seized_from": item.seized_from.name if item.seized_from else "",
+            "seizure_date": fmt_date(item.seizure_date),
+            "seizure_place": item.seizure_place,
+        }
+        for i, item in enumerate(case.seized_items.all(), start=1)
+    ]
+    statements = [
+        {
+            "party": st.party.name if st.party else "",
+            "recorded_date": fmt_date(st.recorded_date),
+            "text": st.text,
+        }
+        for st in case.statements.select_related("party")
+    ]
+    diary = [
+        {
+            "timestamp": fmt_dt(ev.timestamp),
+            "event_type": ev.event_type,
+            "description": ev.description,
+        }
+        for ev in case.diary.all().order_by("timestamp")
+    ]
+
+    return {
+        "today": timezone.localdate().strftime("%d-%m-%Y"),
+        "case": {
+            "case_number": case.case_number,
+            "fir_number": case.fir_number,
+            "fir_date": fmt_date(case.fir_date),
+            "police_station": case.police_station,
+            "status": case.get_status_display(),
+            "incident_place": case.incident_place,
+            "incident_narrative": case.incident_narrative,
+        },
+        "officer": {
+            "name": (officer.get_full_name() or officer.username) if officer else "",
+            "role": officer.get_role_display() if (officer and officer.role) else "",
+            "police_station": officer.police_station if officer else "",
+        },
+        "parties": parties,
+        "sections": confirmed_sections(case),
+        "seized_items": seized_items,
+        "statements": statements,
+        "diary": diary,
     }

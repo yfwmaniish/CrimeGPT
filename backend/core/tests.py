@@ -21,6 +21,7 @@ from .models import (
     LegalSection,
     Party,
     SeizedItem,
+    Statement,
     User,
 )
 
@@ -866,3 +867,115 @@ class MedicalTreatmentLetterTests(APITestCase):
         resp = self.client.post(url)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(Document.objects.filter(case=case, doc_type="MEDICAL").count(), 0)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class ChargesheetTests(APITestCase):
+    """Week 2 Track B: Purvani Chargesheet — the superset document."""
+
+    def setUp(self):
+        import datetime
+
+        from django.utils import timezone
+
+        self.io = User.objects.create_user(username="io_cs", password="pw", role="IO", police_station="PS-Central")
+        self.legal = User.objects.create_user(username="legal_cs", password="pw", role="LEGAL")
+        self.case = Case.objects.create(
+            case_number="CS-1", fir_number="FIR-CS", fir_date="2026-06-01",
+            police_station="PS-Central", status="CHARGESHEET",
+            incident_place="Market Road",
+            incident_narrative="Accused broke into the dwelling and stole jewellery.",
+            io=self.io,
+        )
+        self.victim = Party.objects.create(case=self.case, role="VICTIM", name="Asha Devi", parent_name="Ram Devi", address="9 Lake View")
+        self.accused = Party.objects.create(case=self.case, role="ACCUSED", name="Ravi Kumar", parent_name="Mohan Kumar", address="12 MG Road")
+        self.witness = Party.objects.create(case=self.case, role="WITNESS", name="Sunil Verma", address="5 Nehru Road")
+
+        self.confirmed_sec = LegalSection.objects.create(code="BNS", section_number="305", title="Theft in a dwelling house.", text="...")
+        self.unconfirmed_sec = LegalSection.objects.create(code="BNS", section_number="318", title="Cheating.", text="...")
+        CaseSection.objects.create(case=self.case, section=self.confirmed_sec, suggested_by_ai=True, confirmed=True)
+        CaseSection.objects.create(case=self.case, section=self.unconfirmed_sec, suggested_by_ai=True, confirmed=False)
+
+        SeizedItem.objects.create(case=self.case, description="One mobile phone", quantity="1", seized_from=self.accused, seizure_place="Market Road")
+        SeizedItem.objects.create(case=self.case, description="Stolen gold chain", quantity="1", seized_from=self.accused)
+
+        Statement.objects.create(case=self.case, party=self.victim, text="The accused broke into my house.", recorded_date="2026-06-02")
+        Statement.objects.create(case=self.case, party=self.witness, text="I saw him climb the wall.", recorded_date="2026-06-02")
+
+        DiaryEvent.objects.create(case=self.case, timestamp=timezone.make_aware(datetime.datetime(2026, 6, 1, 10, 0)), event_type="FIR_REGISTERED", description="FIR registered.", actor=self.io)
+        DiaryEvent.objects.create(case=self.case, timestamp=timezone.make_aware(datetime.datetime(2026, 6, 2, 9, 30)), event_type="ARREST", description="Accused arrested at the railway station.", actor=self.io)
+
+        self.url = reverse("case-generate-chargesheet", args=[self.case.id])
+
+    def _all_text(self, case):
+        from io import BytesIO
+
+        from docx import Document as Docx
+
+        from core.documents import build_chargesheet_context_from_case, render_chargesheet
+
+        case.refresh_from_db()
+        tpl = render_chargesheet(build_chargesheet_context_from_case(case))
+        buf = BytesIO()
+        tpl.save(buf)
+        buf.seek(0)
+        doc = Docx(buf)
+        parts = [p.text for p in doc.paragraphs]
+        for t in doc.tables:
+            for row in t.rows:
+                parts.extend(c.text for c in row.cells)
+        return "\n".join(parts)
+
+    def test_render_includes_everything_and_only_confirmed_sections(self):
+        text = self._all_text(self.case)
+
+        # All party roles + names land.
+        for name in ("Asha Devi", "Ravi Kumar", "Sunil Verma"):
+            self.assertIn(name, text)
+        for role in ("Victim", "Accused", "Witness"):
+            self.assertIn(role, text)
+
+        # Confirmed section present; unconfirmed absent (load-bearing boundary).
+        self.assertIn("305", text)
+        self.assertIn("Theft in a dwelling house", text)
+        self.assertNotIn("318", text)
+        self.assertNotIn("Cheating", text)
+
+        # Seized items land.
+        self.assertIn("One mobile phone", text)
+        self.assertIn("Stolen gold chain", text)
+
+        # Statements land (deponent + text).
+        self.assertIn("The accused broke into my house.", text)
+        self.assertIn("I saw him climb the wall.", text)
+
+        # Diary summary lands.
+        self.assertIn("ARREST", text)
+        self.assertIn("railway station", text)
+
+        # Brief facts.
+        self.assertIn("broke into the dwelling", text)
+
+        # No unrendered Jinja anywhere (tables + paragraphs).
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
+
+    def test_io_generates_versioned_with_diary(self):
+        self.client.force_authenticate(self.io)
+        r1 = self.client.post(self.url)
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED, r1.data)
+        self.assertEqual(r1.data["doc_type"], "CHARGESHEET")
+        self.assertEqual(r1.data["version"], 1)
+
+        r2 = self.client.post(self.url)
+        self.assertEqual(r2.data["version"], 2)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="CHARGESHEET").count(), 2)
+        gen_events = self.case.diary.filter(event_type="DOCUMENT_GENERATED")
+        self.assertEqual(gen_events.count(), 2)
+        self.assertIn("Purvani Chargesheet", gen_events.first().description)
+
+    def test_legal_advisor_forbidden(self):
+        self.client.force_authenticate(self.legal)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Document.objects.filter(case=self.case, doc_type="CHARGESHEET").count(), 0)
