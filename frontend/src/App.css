@@ -316,3 +316,36 @@ code {
 .doc-actions select { padding: 0.35rem 0.4rem; }
 .doc-dl { font-weight: 600; color: #2f6fed; }
 .doc-error { flex-basis: 100%; margin: 0.25rem 0 0; }
+
+/* Person rows (reflowed into a compact grid card) */
+.person {
+  position: relative;
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+  padding: 0.7rem;
+  margin-bottom: 0.6rem;
+}
+.person-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+.person-grid > * { min-width: 0; }
+.person-address { grid-column: 1 / -1; }   /* full-width address on its own line */
+.person-del {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  padding: 0.1rem 0.45rem;
+  z-index: 1;
+}
+.arrest-fields {
+  background: #fff7e6;
+  border: 1px solid #f3d999;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+@media (max-width: 560px) {
+  .person-grid { grid-template-columns: 1fr 1fr; }
+}

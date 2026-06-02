@@ -1264,3 +1264,66 @@ class ConfirmSectionTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
         self.cs.refresh_from_db()
         self.assertFalse(self.cs.confirmed)  # unchanged
+
+
+class FullyFilledDocumentTests(TestCase):
+    """Polish check: a fully-filled arrest case renders Remand + Medical with no
+    blank label gaps (age/gender, arrest date/place, confirmed sections)."""
+
+    def _all_text(self, render_fn, ctx_fn, case):
+        from io import BytesIO
+
+        from docx import Document as Docx
+
+        case.refresh_from_db()
+        tpl = render_fn(ctx_fn(case))
+        buf = BytesIO(); tpl.save(buf); buf.seek(0)
+        doc = Docx(buf)
+        parts = [p.text for p in doc.paragraphs]
+        for t in doc.tables:
+            for row in t.rows:
+                parts.extend(c.text for c in row.cells)
+        return "\n".join(parts)
+
+    def test_remand_and_medical_have_no_blank_labels(self):
+        import datetime
+
+        from django.utils import timezone
+
+        from core.documents import (
+            build_medical_context_from_case, render_medical_treatment_letter,
+            build_remand_context_from_case, render_remand_request,
+        )
+
+        io = User.objects.create_user(username="io_full", password="pw", role="IO", police_station="PS-Central")
+        case = Case.objects.create(
+            case_number="FULL-1", fir_number="0145/2026", fir_date="2026-05-28",
+            police_station="Navrangpura PS", status="ARREST",
+            incident_place="Relief Road", incident_narrative="Break-in and theft from a shop.",
+            io=io,
+        )
+        # Victim drives the Medical letter; accused drives the Remand.
+        Party.objects.create(case=case, role="VICTIM", name="Rajesh Patel", parent_name="Manilal Patel", age=38, gender="Male", address="22 Ashram Road")
+        Party.objects.create(case=case, role="ACCUSED", name="Imran Shaikh", parent_name="Yusuf Shaikh", age=26, gender="Male", address="5 Jamalpur")
+        sec = LegalSection.objects.create(code="BNS", section_number="305", title="Theft in a dwelling house.", text="...")
+        CaseSection.objects.create(case=case, section=sec, suggested_by_ai=True, confirmed=True)
+        DiaryEvent.objects.create(
+            case=case, timestamp=timezone.make_aware(datetime.datetime(2026, 5, 29, 9, 0)),
+            event_type="ARREST", description="Accused arrested at Kalupur bus stand.", actor=io,
+        )
+
+        # --- Remand: accused, confirmed section, and arrest details all land ---
+        remand = self._all_text(render_remand_request, build_remand_context_from_case, case)
+        self.assertIn("Imran Shaikh", remand)
+        self.assertIn("305", remand)
+        self.assertIn("29-05-2026", remand)          # arrest date filled
+        self.assertIn("Kalupur bus stand", remand)   # arrest place filled
+        self.assertNotIn("arrested on .", remand)    # the old blank-gap bug
+
+        # --- Medical: victim with age + gender, no blank "aged  years" ---
+        medical = self._all_text(render_medical_treatment_letter, build_medical_context_from_case, case)
+        self.assertIn("Rajesh Patel", medical)
+        self.assertIn("aged 38 years", medical)      # age filled
+        self.assertIn("Male", medical)               # gender filled
+        self.assertNotIn("aged  years", medical)     # no blank gap
+        self.assertNotIn("{{", medical)

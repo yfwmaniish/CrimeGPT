@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createCase, ApiError } from "./api";
+import { createCase, addDiaryEvent, ApiError } from "./api";
 import Sections from "./Sections";
 import Documents from "./Documents";
 import Diary from "./Diary";
@@ -10,8 +10,17 @@ const ROLES = [
   ["ACCUSED", "Accused"],
   ["WITNESS", "Witness"],
 ];
+const GENDERS = ["Male", "Female", "Other"];
 
-const emptyParty = () => ({ role: "ACCUSED", name: "", parent_name: "", phone: "", address: "" });
+const emptyParty = () => ({
+  role: "ACCUSED",
+  name: "",
+  parent_name: "",
+  age: "",
+  gender: "",
+  phone: "",
+  address: "",
+});
 const emptyItem = () => ({ description: "", quantity: "", seized_from_index: "", seizure_date: "", seizure_place: "" });
 
 // Flatten DRF error objects into readable lines.
@@ -42,6 +51,7 @@ export default function CaseForm({ user }) {
   const [busy, setBusy] = useState(false);
 
   const [diaryRefresh, setDiaryRefresh] = useState(0);
+  const [arrest, setArrest] = useState({ date: "", place: "" });
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const updateParty = (i, k, v) =>
@@ -60,6 +70,8 @@ export default function CaseForm({ user }) {
           role: p.role,
           name: p.name,
           parent_name: p.parent_name,
+          age: p.age === "" ? null : Number(p.age),
+          gender: p.gender,
           phone: p.phone,
           address: p.address,
         })),
@@ -75,6 +87,22 @@ export default function CaseForm({ user }) {
         }),
       };
       const created = await createCase(payload);
+
+      // If the case is being filed as an arrest, log an ARREST diary event so the
+      // Remand Request builder (which reads the latest ARREST event) is populated.
+      if (form.status === "ARREST" && (arrest.date || arrest.place)) {
+        const where = arrest.place ? ` at ${arrest.place}` : "";
+        try {
+          await addDiaryEvent(created.id, {
+            event_type: "ARREST",
+            description: `Accused arrested${where}.`,
+            timestamp: arrest.date ? `${arrest.date}T09:00:00` : undefined,
+          });
+        } catch {
+          /* non-fatal: the case is created; arrest detail can be added via the diary */
+        }
+      }
+
       setCreatedCase(created);
     } catch (err) {
       setErrors(err instanceof ApiError ? flattenErrors(err.data) : [err.message]);
@@ -146,6 +174,23 @@ export default function CaseForm({ user }) {
             <input value={form.incident_place} onChange={(e) => setField("incident_place", e.target.value)} />
           </label>
         </div>
+
+        {form.status === "ARREST" && (
+          <div className="grid2 arrest-fields">
+            <label>
+              Arrest date
+              <input type="date" value={arrest.date} onChange={(e) => setArrest((a) => ({ ...a, date: e.target.value }))} />
+            </label>
+            <label>
+              Place of arrest
+              <input value={arrest.place} onChange={(e) => setArrest((a) => ({ ...a, place: e.target.value }))} placeholder="e.g. near Kalupur bus stand" />
+            </label>
+            <p className="hint" style={{ gridColumn: "1 / -1", margin: 0 }}>
+              Recorded as an arrest entry in the case diary, and used by the Remand Request.
+            </p>
+          </div>
+        )}
+
         <label>
           What happened (narrative)
           <textarea
@@ -164,21 +209,46 @@ export default function CaseForm({ user }) {
           </button>
         </div>
         {parties.map((p, i) => (
-          <div className="subrow" key={i}>
-            <select value={p.role} onChange={(e) => updateParty(i, "role", e.target.value)}>
-              {ROLES.map(([v, label]) => (
-                <option key={v} value={v}>{label}</option>
-              ))}
-            </select>
-            <input placeholder="Name" value={p.name} onChange={(e) => updateParty(i, "name", e.target.value)} />
-            <input placeholder="Father's/Husband's name" value={p.parent_name} onChange={(e) => updateParty(i, "parent_name", e.target.value)} />
-            <input placeholder="Phone" value={p.phone} onChange={(e) => updateParty(i, "phone", e.target.value)} />
-            <input placeholder="Address" value={p.address} onChange={(e) => updateParty(i, "address", e.target.value)} />
+          <div className="person" key={i}>
             {parties.length > 1 && (
-              <button type="button" className="del" onClick={() => setParties((ps) => ps.filter((_, idx) => idx !== i))}>
+              <button
+                type="button"
+                className="del person-del"
+                title="Remove person"
+                onClick={() => setParties((ps) => ps.filter((_, idx) => idx !== i))}
+              >
                 ✕
               </button>
             )}
+            <div className="person-grid">
+              <select value={p.role} onChange={(e) => updateParty(i, "role", e.target.value)}>
+                {ROLES.map(([v, label]) => (
+                  <option key={v} value={v}>{label}</option>
+                ))}
+              </select>
+              <input placeholder="Name" value={p.name} onChange={(e) => updateParty(i, "name", e.target.value)} />
+              <input placeholder="Father's/Husband's name" value={p.parent_name} onChange={(e) => updateParty(i, "parent_name", e.target.value)} />
+              <input
+                type="number"
+                min="0"
+                placeholder="Age"
+                value={p.age}
+                onChange={(e) => updateParty(i, "age", e.target.value)}
+              />
+              <select value={p.gender} onChange={(e) => updateParty(i, "gender", e.target.value)}>
+                <option value="">Gender…</option>
+                {GENDERS.map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+              <input placeholder="Phone" value={p.phone} onChange={(e) => updateParty(i, "phone", e.target.value)} />
+              <input
+                className="person-address"
+                placeholder="Address"
+                value={p.address}
+                onChange={(e) => updateParty(i, "address", e.target.value)}
+              />
+            </div>
           </div>
         ))}
       </section>

@@ -95,11 +95,10 @@ export function getDiary(caseId) {
   return request(`/api/cases/${caseId}/diary/`);
 }
 
-export function addDiaryEvent(caseId, { event_type, description }) {
-  return request(`/api/cases/${caseId}/diary/`, {
-    method: "POST",
-    body: { event_type, description },
-  });
+export function addDiaryEvent(caseId, { event_type, description, timestamp }) {
+  const body = { event_type, description };
+  if (timestamp) body.timestamp = timestamp;
+  return request(`/api/cases/${caseId}/diary/`, { method: "POST", body });
 }
 
 export { API_BASE };
