@@ -73,4 +73,15 @@ export function generateSeizureReceipt(caseId) {
   return request(`/api/cases/${caseId}/documents/seizure/`, { method: "POST" });
 }
 
+export function getDiary(caseId) {
+  return request(`/api/cases/${caseId}/diary/`);
+}
+
+export function addDiaryEvent(caseId, { event_type, description }) {
+  return request(`/api/cases/${caseId}/diary/`, {
+    method: "POST",
+    body: { event_type, description },
+  });
+}
+
 export { API_BASE };

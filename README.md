@@ -209,6 +209,19 @@ auto-confirmed, re-running never duplicates or un-confirms existing rows, and no
 unconfirmed section is ever written into a document. Officer confirmation is a
 separate explicit action.
 
+## Case diary timeline (Week 2, Track D)
+
+```
+GET  /api/cases/{id}/diary/   # chronological events (any authenticated user)
+POST /api/cases/{id}/diary/   # add a manual step (IO/SHO only)
+```
+
+The diary mixes **auto-logged** system events (e.g. `DOCUMENT_GENERATED`) with
+**manual** entries an officer adds (`{"event_type": "WITNESS_INTERVIEWED",
+"description": "..."}` — `event_type` defaults to `MANUAL`). The React case view
+renders it as a vertical timeline; adding a step is gated to IO/SHO (same write
+RBAC as document generation), while anyone signed in can view.
+
 ## Documents — Seizure Receipt (Day 3)
 
 The Word template lives at `backend/core/doc_templates/seizure_receipt.docx` and

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createCase, generateSeizureReceipt, ApiError } from "./api";
+import Diary from "./Diary";
 
 const STATUSES = ["COMPLAINT", "INVESTIGATION", "ARREST", "CHARGESHEET"];
 const ROLES = [
@@ -50,6 +51,7 @@ export default function CaseForm({ user }) {
   const [genResult, setGenResult] = useState(null); // { version, download_url, diary_event }
   const [genError, setGenError] = useState(null);
   const [genBusy, setGenBusy] = useState(false);
+  const [diaryRefresh, setDiaryRefresh] = useState(0);
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const updateParty = (i, k, v) =>
@@ -98,6 +100,8 @@ export default function CaseForm({ user }) {
       const result = await generateSeizureReceipt(createdCase.id);
       setGenResult(result);
       triggerDownload(result.download_url);
+      setDiaryRefresh((n) => n + 1); // generation logged a diary event
+
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
         setGenError(
@@ -161,6 +165,8 @@ export default function CaseForm({ user }) {
             </div>
           )}
         </section>
+
+        <Diary caseId={createdCase.id} user={user} refreshSignal={diaryRefresh} />
 
         <button
           className="link-btn"

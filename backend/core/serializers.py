@@ -28,7 +28,7 @@ replacing ``parties`` cascades to its dependents, send ``parties``,
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Case, Party, SeizedItem, Statement, User
+from .models import Case, DiaryEvent, Party, SeizedItem, Statement, User
 
 
 class PartySerializer(serializers.ModelSerializer):
@@ -189,3 +189,23 @@ class CaseSerializer(serializers.ModelSerializer):
 
         self._sync_nested(instance, parties_data, items_data, statements_data)
         return instance
+
+
+class DiaryEventSerializer(serializers.ModelSerializer):
+    """Read/write serializer for case diary events.
+
+    On read, ``actor`` is the username. On write (manual entry), ``description``
+    is required; ``event_type`` defaults to MANUAL and ``timestamp`` to now (set
+    in the view). ``actor`` and ``case`` are set server-side, never from input.
+    """
+
+    actor = serializers.SerializerMethodField()
+    event_type = serializers.CharField(required=False, default="MANUAL", max_length=50)
+    timestamp = serializers.DateTimeField(required=False)
+
+    class Meta:
+        model = DiaryEvent
+        fields = ["id", "timestamp", "event_type", "description", "actor"]
+
+    def get_actor(self, obj):
+        return obj.actor.username if obj.actor else None

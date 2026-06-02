@@ -1148,3 +1148,78 @@ class PdfExportTests(APITestCase):
         self.assertTrue(resp.data["download_url"].endswith(".docx"))
         doc = Document.objects.get(case=self.case, doc_type="SEIZURE")
         self.assertFalse(doc.pdf_file)
+
+
+class DiaryAPITests(APITestCase):
+    """Week 2 Track D: case diary timeline endpoint."""
+
+    def setUp(self):
+        import datetime
+
+        from django.utils import timezone
+
+        self.io = User.objects.create_user(username="io_diary", password="pw", role="IO", police_station="PS-Central")
+        self.legal = User.objects.create_user(username="legal_diary", password="pw", role="LEGAL")
+        self.case = Case.objects.create(
+            case_number="DIARY-1", fir_number="FIR-D", fir_date="2026-06-01",
+            police_station="PS-Central", incident_narrative="x", io=self.io,
+        )
+        mk = lambda *a: timezone.make_aware(datetime.datetime(*a))
+        # Created out of chronological order on purpose.
+        DiaryEvent.objects.create(case=self.case, timestamp=mk(2026, 6, 3, 9, 0), event_type="ARREST", description="Accused arrested.", actor=self.io)
+        DiaryEvent.objects.create(case=self.case, timestamp=mk(2026, 6, 1, 10, 0), event_type="FIR_REGISTERED", description="FIR registered.", actor=self.io)
+        DiaryEvent.objects.create(case=self.case, timestamp=mk(2026, 6, 2, 14, 0), event_type="SEIZURE", description="Items seized.", actor=self.io)
+        self.url = reverse("case-diary", args=[self.case.id])
+
+    def test_diary_returns_events_chronologically(self):
+        self.client.force_authenticate(self.io)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        descriptions = [e["description"] for e in resp.data]
+        self.assertEqual(descriptions, ["FIR registered.", "Items seized.", "Accused arrested."])
+        # Timestamps strictly ascending.
+        timestamps = [e["timestamp"] for e in resp.data]
+        self.assertEqual(timestamps, sorted(timestamps))
+        # Fields present.
+        first = resp.data[0]
+        self.assertEqual(set(first), {"id", "timestamp", "event_type", "description", "actor"})
+        self.assertEqual(first["actor"], "io_diary")
+
+    def test_io_can_add_manual_event_and_it_appears(self):
+        self.client.force_authenticate(self.io)
+        resp = self.client.post(
+            self.url,
+            {"event_type": "WITNESS_INTERVIEWED", "description": "Interviewed the shopkeeper."},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertEqual(resp.data["actor"], "io_diary")
+        self.assertEqual(resp.data["event_type"], "WITNESS_INTERVIEWED")
+
+        # It now appears in the timeline (placed chronologically by timestamp).
+        events = self.client.get(self.url).data
+        self.assertEqual(len(events), 4)
+        self.assertIn("Interviewed the shopkeeper.", [e["description"] for e in events])
+        timestamps = [e["timestamp"] for e in events]
+        self.assertEqual(timestamps, sorted(timestamps))
+
+    def test_manual_event_defaults_type_and_timestamp(self):
+        self.client.force_authenticate(self.io)
+        resp = self.client.post(self.url, {"description": "Evidence collected."}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertEqual(resp.data["event_type"], "MANUAL")  # default
+        self.assertIsNotNone(resp.data["timestamp"])         # defaulted to now
+
+    def test_legal_advisor_can_view_but_not_add(self):
+        self.client.force_authenticate(self.legal)
+        # Can read.
+        self.assertEqual(self.client.get(self.url).status_code, status.HTTP_200_OK)
+        # Cannot write.
+        before = self.case.diary.count()
+        resp = self.client.post(self.url, {"description": "Should be rejected."}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(self.case.diary.count(), before)
+
+    def test_unauthenticated_cannot_view(self):
+        resp = self.client.get(self.url)
+        self.assertIn(resp.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))

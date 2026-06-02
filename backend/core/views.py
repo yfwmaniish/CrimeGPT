@@ -9,7 +9,12 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
+from rest_framework.permissions import (
+    SAFE_METHODS,
+    AllowAny,
+    BasePermission,
+    IsAuthenticated,
+)
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -31,7 +36,7 @@ from .documents import (
 )
 from .models import Case, CaseSection, DiaryEvent, Document, LegalSection
 from .pdf import convert_docx_to_pdf
-from .serializers import CaseSerializer
+from .serializers import CaseSerializer, DiaryEventSerializer
 
 
 def _user_payload(user):
@@ -82,6 +87,21 @@ class CanGenerateDocuments(BasePermission):
         return bool(
             user and user.is_authenticated and getattr(user, "role", "") in ("IO", "SHO")
         )
+
+
+class CanViewOrLogDiary(BasePermission):
+    """Any authenticated user may read the diary; only IO/SHO may add events
+    (same write RBAC as document generation)."""
+
+    message = "Only Investigating Officers (IO) and Station House Officers (SHO) may add diary events."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return getattr(user, "role", "") in ("IO", "SHO")
 
 
 class CaseViewSet(viewsets.ModelViewSet):
@@ -295,6 +315,32 @@ class CaseViewSet(viewsets.ModelViewSet):
             doc_type="FACEID", label="Face Identification Form",
             filename_prefix="face_identification_form", rendered=rendered,
         )
+
+    @action(
+        detail=True,
+        methods=["get", "post"],
+        url_path="diary",
+        url_name="diary",
+        permission_classes=[CanViewOrLogDiary],
+    )
+    def diary(self, request, pk=None):
+        """Case diary timeline.
+
+        GET: the case's events in chronological order (any authenticated user).
+        POST: add a manual event (IO/SHO only) so investigative steps are
+        recorded alongside the auto-logged system events.
+        """
+        case = self.get_object()
+
+        if request.method == "POST":
+            serializer = DiaryEventSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            timestamp = serializer.validated_data.get("timestamp") or timezone.now()
+            event = serializer.save(case=case, actor=request.user, timestamp=timestamp)
+            return Response(DiaryEventSerializer(event).data, status=status.HTTP_201_CREATED)
+
+        events = case.diary.all().order_by("timestamp")
+        return Response(DiaryEventSerializer(events, many=True).data)
 
     @action(
         detail=True,
