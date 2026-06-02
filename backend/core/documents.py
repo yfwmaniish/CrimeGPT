@@ -24,6 +24,7 @@ DOC_TEMPLATE_DIR = Path(settings.BASE_DIR) / "core" / "doc_templates"
 SEIZURE_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "seizure_receipt.docx"
 REMAND_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "remand_request.docx"
 COURT_CUSTODY_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "court_custody_letter.docx"
+MEDICAL_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "medical_treatment_letter.docx"
 
 # Columns of the seized-items table: (header label, per-row Jinja tag).
 _ITEM_COLUMNS = [
@@ -447,4 +448,105 @@ def build_court_custody_context_from_case(case) -> dict:
             "address": accused.address if accused else "",
         },
         "sections": confirmed_sections(case),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Medical Treatment Letter
+# --------------------------------------------------------------------------- #
+def resolve_medical_subject(case):
+    """The person the medical letter is about. Prefer the VICTIM; fall back to
+    the ACCUSED (injured-in-custody / arrest-injury cases); else None.
+    """
+    victim = case.parties.filter(role="VICTIM").first()
+    if victim is not None:
+        return victim
+    return case.parties.filter(role="ACCUSED").first()
+
+
+def build_medical_treatment_template(path: Path = MEDICAL_TEMPLATE_PATH) -> Path:
+    """Create the Medical Treatment/Examination Letter .docx template."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    doc = Document()
+
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title.add_run("REQUEST FOR MEDICAL EXAMINATION / TREATMENT")
+    run.bold = True
+    run.font.size = Pt(15)
+
+    doc.add_paragraph("To,")
+    doc.add_paragraph("The Medical Officer,")
+
+    meta = doc.add_paragraph()
+    meta.add_run("Police Station: ").bold = True
+    meta.add_run("{{ case.police_station }}    ")
+    meta.add_run("FIR No.: ").bold = True
+    meta.add_run("{{ case.fir_number }}    ")
+    meta.add_run("Case No.: ").bold = True
+    meta.add_run("{{ case.case_number }}")
+
+    datep = doc.add_paragraph()
+    datep.add_run("Date: ").bold = True
+    datep.add_run("{{ today }}")
+
+    doc.add_paragraph(
+        "The bearer of this letter, {{ subject.name }}, child/spouse of "
+        "{{ subject.parent_name }}, aged {{ subject.age }} years, "
+        "{{ subject.gender }}, resident of {{ subject.address }}, is the "
+        "{{ subject.role }} in the above-mentioned case."
+    )
+    doc.add_paragraph(
+        "Kindly conduct the medical examination and provide necessary treatment, "
+        "and furnish a medical report to this office. Brief facts of the case: "
+        "{{ case.incident_narrative }}"
+    )
+
+    doc.add_paragraph()  # spacer
+    sig = doc.add_paragraph()
+    sig.add_run("Signature of Investigating Officer: __________________  ")
+    sig.add_run("({{ officer.name }}, {{ officer.role }})")
+
+    doc.save(str(path))
+    return path
+
+
+def render_medical_treatment_letter(context: dict, template_path: Path = MEDICAL_TEMPLATE_PATH) -> DocxTemplate:
+    """Render the Medical Treatment Letter template with ``context``."""
+    tpl = DocxTemplate(str(template_path))
+    tpl.render(context)
+    return tpl
+
+
+def build_medical_context_from_case(case) -> dict:
+    """Map a Case (+ the medical subject and incident) to the Medical Treatment
+    Letter context. Subject is resolved VICTIM -> ACCUSED -> blank.
+    """
+    subject = resolve_medical_subject(case)
+    officer = case.io
+
+    return {
+        "today": timezone.localdate().strftime("%d-%m-%Y"),
+        "case": {
+            "case_number": case.case_number,
+            "fir_number": case.fir_number,
+            "police_station": case.police_station,
+            "incident_place": case.incident_place,
+            "incident_narrative": case.incident_narrative,
+        },
+        "officer": {
+            "name": (officer.get_full_name() or officer.username) if officer else "",
+            "role": officer.get_role_display() if (officer and officer.role) else "",
+            "police_station": officer.police_station if officer else "",
+        },
+        "subject": {
+            "name": subject.name if subject else "",
+            "parent_name": subject.parent_name if subject else "",
+            "age": subject.age if (subject and subject.age is not None) else "",
+            "gender": subject.gender if subject else "",
+            "address": subject.address if subject else "",
+            "role": subject.get_role_display() if subject else "",
+        },
     }

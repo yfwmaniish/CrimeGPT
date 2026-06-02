@@ -770,3 +770,99 @@ class CourtCustodyLetterTests(APITestCase):
         resp = self.client.post(self.url)
         self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(Document.objects.filter(case=self.case, doc_type="CUSTODY").count(), 0)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class MedicalTreatmentLetterTests(APITestCase):
+    """Week 2 Track B: Medical Treatment Letter (subject VICTIM -> ACCUSED -> blank)."""
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io_med", password="pw", role="IO", police_station="PS-Central")
+        self.legal = User.objects.create_user(username="legal_med", password="pw", role="LEGAL")
+
+    def _make_case(self, number):
+        return Case.objects.create(
+            case_number=number, fir_number="FIR-MED", fir_date="2026-06-01",
+            police_station="PS-Central",
+            incident_narrative="Complainant was assaulted and injured.",
+            io=self.io,
+        )
+
+    def _paragraph_text(self, case):
+        from io import BytesIO
+
+        from docx import Document as Docx
+
+        from core.documents import build_medical_context_from_case, render_medical_treatment_letter
+
+        tpl = render_medical_treatment_letter(build_medical_context_from_case(case))
+        buf = BytesIO()
+        tpl.save(buf)
+        buf.seek(0)
+        return "\n".join(p.text for p in Docx(buf).paragraphs)
+
+    def test_subject_is_victim_when_present(self):
+        case = self._make_case("MED-1")
+        Party.objects.create(case=case, role="VICTIM", name="Asha Devi",
+                             parent_name="Ram Devi", age=30, gender="Female", address="9 Lake View")
+        Party.objects.create(case=case, role="ACCUSED", name="Ravi Kumar",
+                             parent_name="Mohan", address="12 MG Road")
+
+        text = self._paragraph_text(case)
+        self.assertIn("Asha Devi", text)        # victim is the subject
+        self.assertIn("9 Lake View", text)
+        self.assertIn("Victim", text)           # role label rendered
+        self.assertNotIn("Ravi Kumar", text)    # accused is NOT the subject
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
+
+    def test_falls_back_to_accused_when_no_victim(self):
+        case = self._make_case("MED-2")
+        Party.objects.create(case=case, role="ACCUSED", name="Ravi Kumar",
+                             parent_name="Mohan Kumar", age=25, gender="Male", address="12 MG Road")
+        self.assertFalse(case.parties.filter(role="VICTIM").exists())
+
+        text = self._paragraph_text(case)
+        self.assertIn("Ravi Kumar", text)       # accused used as fallback subject
+        self.assertIn("12 MG Road", text)
+        self.assertIn("Accused", text)
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
+
+    def test_blank_subject_when_no_victim_or_accused(self):
+        case = self._make_case("MED-3")
+        Party.objects.create(case=case, role="WITNESS", name="Sunil", address="5 Nehru Rd")
+
+        text = self._paragraph_text(case)
+        # Renders cleanly with a blank subject (no crash, no leftover tags),
+        # and the witness is not pulled in as the subject.
+        self.assertNotIn("Sunil", text)
+        self.assertNotIn("{{", text)
+        self.assertNotIn("{%", text)
+
+    def test_io_generates_versioned_with_diary(self):
+        case = self._make_case("MED-4")
+        Party.objects.create(case=case, role="VICTIM", name="Asha Devi", address="9 Lake View")
+        url = reverse("case-generate-medical", args=[case.id])
+        self.client.force_authenticate(self.io)
+
+        r1 = self.client.post(url)
+        self.assertEqual(r1.status_code, status.HTTP_201_CREATED, r1.data)
+        self.assertEqual(r1.data["doc_type"], "MEDICAL")
+        self.assertEqual(r1.data["version"], 1)
+
+        r2 = self.client.post(url)
+        self.assertEqual(r2.data["version"], 2)
+        self.assertEqual(Document.objects.filter(case=case, doc_type="MEDICAL").count(), 2)
+        events = case.diary.filter(event_type="DOCUMENT_GENERATED")
+        self.assertEqual(events.count(), 2)
+        self.assertIn("Medical Treatment Letter", events.first().description)
+
+    def test_legal_advisor_forbidden(self):
+        case = self._make_case("MED-5")
+        Party.objects.create(case=case, role="VICTIM", name="Asha Devi", address="9 Lake View")
+        url = reverse("case-generate-medical", args=[case.id])
+        self.client.force_authenticate(self.legal)
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(Document.objects.filter(case=case, doc_type="MEDICAL").count(), 0)

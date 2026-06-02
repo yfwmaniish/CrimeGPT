@@ -15,9 +15,11 @@ from rest_framework.views import APIView
 
 from .documents import (
     build_court_custody_context_from_case,
+    build_medical_context_from_case,
     build_remand_context_from_case,
     build_seizure_context_from_case,
     render_court_custody_letter,
+    render_medical_treatment_letter,
     render_remand_request,
     render_seizure_receipt,
 )
@@ -194,6 +196,26 @@ class CaseViewSet(viewsets.ModelViewSet):
             request, case,
             doc_type="CUSTODY", label="Court Custody Letter",
             filename_prefix="court_custody_letter", rendered=rendered,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="documents/medical",
+        url_name="generate-medical",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def generate_medical(self, request, pk=None):
+        """Generate (or regenerate, versioned) the Medical Treatment Letter.
+
+        Subject is the VICTIM, falling back to the ACCUSED, else blank.
+        """
+        case = self.get_object()
+        rendered = render_medical_treatment_letter(build_medical_context_from_case(case))
+        return self._finalize_document(
+            request, case,
+            doc_type="MEDICAL", label="Medical Treatment Letter",
+            filename_prefix="medical_treatment_letter", rendered=rendered,
         )
 
     @action(
