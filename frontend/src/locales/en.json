@@ -22,6 +22,8 @@
     "newCase": "+ New case",
     "empty": "No cases yet.",
     "createFirst": "Create your first case",
+    "searchPlaceholder": "Search by case number, FIR number, or narrative…",
+    "noResults": "No cases match your search.",
     "colCase": "Case no.",
     "colFir": "FIR no.",
     "colStation": "Police station",

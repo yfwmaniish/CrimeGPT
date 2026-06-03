@@ -370,3 +370,12 @@ code {
   background: #fff;
   font-size: 0.85rem;
 }
+
+/* Case search */
+.search-input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #cbd2d9;
+  border-radius: 8px;
+  font: inherit;
+}

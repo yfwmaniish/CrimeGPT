@@ -157,19 +157,35 @@ docker compose exec web python manage.py test core
 
 ## Legal data — BNS sections (Day 3)
 
-Reference data for the `LegalSection` model. Two official sources are combined:
-section text from **India Code** (indiacode.nic.in, Act 45 of 2023) and the
-IPC-equivalent from the **NCRB** corresponding-section table.
+Reference data for the `LegalSection` model. **All three new criminal codes are
+loaded** (`LegalSection.code` = `BNS` / `BNSS` / `BSA`), so section suggestions
+rank across all of them:
+
+| Code | Act | Replaces | Sections | Scraper |
+|------|-----|----------|----------|---------|
+| BNS  | Bharatiya Nyaya Sanhita, 2023 | Indian Penal Code | 358 | `scrape_bns` |
+| BNSS | Bharatiya Nagarik Suraksha Sanhita, 2023 | CrPC | 531 | `scrape_bnss` |
+| BSA  | Bharatiya Sakshya Adhiniyam, 2023 | Indian Evidence Act | 170 | `scrape_bsa` |
+
+Section text comes verbatim from **India Code** (indiacode.nic.in); the
+**`ipc_equivalent`** column is a generic *old-act equivalent* string — IPC for
+BNS, **CrPC for BNSS, Indian Evidence Act for BSA** — sourced from the **NCRB**
+Compendium correspondence tables. (Column name kept as `ipc_equivalent` so the
+loader is unchanged.)
 
 ```sh
-# Scrape all 358 BNS sections (+ IPC equivalents) into a CSV:
-docker compose exec web python manage.py scrape_bns --out data/bns_sections.csv
-# Load that CSV into the database (idempotent — safe to re-run):
+# Scrape each act into a CSV, then load (loader is idempotent):
+docker compose exec web python manage.py scrape_bns   --out data/bns_sections.csv
+docker compose exec web python manage.py scrape_bnss  --out data/bnss_sections.csv
+docker compose exec web python manage.py scrape_bsa   --out data/bsa_sections.csv
 docker compose exec web python manage.py load_legal_sections data/bns_sections.csv
+docker compose exec web python manage.py load_legal_sections data/bnss_sections.csv
+docker compose exec web python manage.py load_legal_sections data/bsa_sections.csv
+docker compose exec web python manage.py embed_legal_sections   # embeds any new rows
 ```
 
-A pre-scraped `backend/data/bns_sections.csv` (358 rows, 347 with IPC mappings)
-is committed, so you can just run the `load_legal_sections` step.
+Pre-scraped CSVs for all three are committed under `backend/data/`, so a fresh
+setup can skip scraping and just `load_legal_sections` each + `embed_legal_sections`.
 
 **Fallback** (if a source site changes/blocks): the scraper degrades gracefully —
 `--no-ipc` skips the IPC table, `--ipc-map FILE.csv` supplies it locally. If

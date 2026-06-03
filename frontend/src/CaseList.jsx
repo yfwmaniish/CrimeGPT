@@ -12,14 +12,21 @@ function fmtDate(ts) {
 
 export default function CaseList({ onOpen, onNew }) {
   const { t } = useTranslation();
+  const [query, setQuery] = useState("");
   const [cases, setCases] = useState(null);
   const [error, setError] = useState(null);
 
+  // Debounced search (~300ms). Empty query restores the full list.
   useEffect(() => {
-    listCases()
-      .then((data) => setCases(data.results))
-      .catch((err) => setError(err.message));
-  }, []);
+    const term = query.trim();
+    const handle = setTimeout(() => {
+      setError(null);
+      listCases(term)
+        .then((data) => setCases(data.results))
+        .catch((err) => setError(err.message));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [query]);
 
   return (
     <div className="stack">
@@ -28,13 +35,28 @@ export default function CaseList({ onOpen, onNew }) {
         <button className="add" onClick={onNew}>{t("list.newCase")}</button>
       </div>
 
+      <input
+        className="search-input"
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={t("list.searchPlaceholder")}
+        aria-label={t("list.searchPlaceholder")}
+      />
+
       {error && <p className="bad">✗ {error}</p>}
       {!error && cases === null && <p className="muted">{t("common.loading")}</p>}
 
       {cases && cases.length === 0 && (
         <section className="card">
-          <p className="muted">{t("list.empty")}</p>
-          <button onClick={onNew}>{t("list.createFirst")}</button>
+          {query.trim() ? (
+            <p className="muted">{t("list.noResults")}</p>
+          ) : (
+            <>
+              <p className="muted">{t("list.empty")}</p>
+              <button onClick={onNew}>{t("list.createFirst")}</button>
+            </>
+          )}
         </section>
       )}
 

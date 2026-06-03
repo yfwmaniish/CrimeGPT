@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
+from rest_framework.filters import SearchFilter
 from rest_framework.permissions import (
     SAFE_METHODS,
     AllowAny,
@@ -117,6 +118,10 @@ class CaseViewSet(viewsets.ModelViewSet):
         .prefetch_related("parties", "seized_items", "statements")
         .all()
     )
+    # Keyword/case-number search (?search=). Applied AFTER get_queryset scoping,
+    # so an officer never finds another officer's case via search.
+    filter_backends = [SearchFilter]
+    search_fields = ["case_number", "fir_number", "incident_narrative", "police_station"]
 
     def get_queryset(self):
         qs = super().get_queryset()

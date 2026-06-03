@@ -70,9 +70,11 @@ export function createCase(payload) {
 }
 
 // The requesting officer's cases (the list endpoint is scoped server-side),
-// newest first. Returns the paginated { count, results, ... } envelope.
-export function listCases() {
-  return request("/api/cases/");
+// newest first, optionally filtered by a search term. Returns the paginated
+// { count, results, ... } envelope.
+export function listCases(search = "") {
+  const q = search ? `?search=${encodeURIComponent(search)}` : "";
+  return request(`/api/cases/${q}`);
 }
 
 export function generateSeizureReceipt(caseId) {

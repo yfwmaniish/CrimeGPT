@@ -1447,3 +1447,49 @@ class MultilingualTests(APITestCase):
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
         text = self._docx_text(Document.objects.get(case=case, doc_type="SEIZURE"))
         self.assertIn("SEIZURE RECEIPT", text)
+
+
+class CaseSearchTests(APITestCase):
+    """Part 2: keyword/case-number search on the case list, still scoped."""
+
+    def setUp(self):
+        self.io1 = User.objects.create_user(username="io_s1", password="pw", role="IO")
+        self.io2 = User.objects.create_user(username="io_s2", password="pw", role="IO")
+        Case.objects.create(case_number="CR-501", fir_number="0500/2026", fir_date="2026-06-01",
+                            police_station="PS", incident_narrative="A stolen motorcycle near the temple.", io=self.io1)
+        Case.objects.create(case_number="CR-502", fir_number="0501/2026", fir_date="2026-06-01",
+                            police_station="PS", incident_narrative="A dowry harassment complaint.", io=self.io1)
+        # Another officer's case that also mentions "motorcycle".
+        Case.objects.create(case_number="ZZ-999", fir_number="9999/2026", fir_date="2026-06-01",
+                            police_station="PS", incident_narrative="Another stolen motorcycle case.", io=self.io2)
+        self.url = reverse("case-list")
+
+    def _numbers(self, term):
+        resp = self.client.get(self.url, {"search": term})
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        return {c["case_number"] for c in resp.data["results"]}
+
+    def test_search_by_case_number(self):
+        self.client.force_authenticate(self.io1)
+        self.assertEqual(self._numbers("CR-501"), {"CR-501"})
+
+    def test_search_in_narrative(self):
+        self.client.force_authenticate(self.io1)
+        self.assertEqual(self._numbers("motorcycle"), {"CR-501"})  # io1's only
+        self.assertEqual(self._numbers("dowry"), {"CR-502"})
+
+    def test_search_by_fir_number(self):
+        self.client.force_authenticate(self.io1)
+        self.assertEqual(self._numbers("0500/2026"), {"CR-501"})
+
+    def test_search_respects_scoping(self):
+        # io1 searching a term present in io2's case must NOT see io2's case.
+        self.client.force_authenticate(self.io1)
+        self.assertNotIn("ZZ-999", self._numbers("motorcycle"))
+        # And io2 finds their own.
+        self.client.force_authenticate(self.io2)
+        self.assertEqual(self._numbers("motorcycle"), {"ZZ-999"})
+
+    def test_empty_search_returns_all_mine(self):
+        self.client.force_authenticate(self.io1)
+        self.assertEqual(self._numbers(""), {"CR-501", "CR-502"})
