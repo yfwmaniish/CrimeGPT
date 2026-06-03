@@ -949,8 +949,9 @@ class ChargesheetTests(APITestCase):
         self.assertIn("The accused broke into my house.", text)
         self.assertIn("I saw him climb the wall.", text)
 
-        # Diary summary lands.
-        self.assertIn("ARREST", text)
+        # Diary summary lands, with the friendly event label (not the raw code).
+        self.assertIn("Arrest", text)
+        self.assertNotIn("DOCUMENT_GENERATED", text)  # friendly "Document Generated" instead
         self.assertIn("railway station", text)
 
         # Brief facts.
@@ -1493,3 +1494,101 @@ class CaseSearchTests(APITestCase):
     def test_empty_search_returns_all_mine(self):
         self.client.force_authenticate(self.io1)
         self.assertEqual(self._numbers(""), {"CR-501", "CR-502"})
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class RemandExtrasTests(APITestCase):
+    """Custody-days input + arrest-date fallback for the Remand Request."""
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io_rx", password="pw", role="IO", police_station="PS")
+        self.client.force_authenticate(self.io)
+
+    def _make_case(self, number, narrative="Break-in and theft."):
+        case = Case.objects.create(
+            case_number=number, fir_number="F", fir_date="2026-06-01",
+            police_station="PS", status="ARREST", incident_narrative=narrative, io=self.io,
+        )
+        Party.objects.create(case=case, role="ACCUSED", name="Imran", parent_name="Yusuf", address="x")
+        return case
+
+    def _remand_text(self, case):
+        from io import BytesIO
+        from docx import Document as Docx
+        from core.documents import build_remand_context_from_case, render_remand_request
+        case.refresh_from_db()
+        tpl = render_remand_request(build_remand_context_from_case(
+            case, custody_days=self._days))
+        buf = BytesIO(); tpl.save(buf); buf.seek(0)
+        return "\n".join(p.text for p in Docx(buf).paragraphs)
+
+    def test_custody_days_input_appears(self):
+        case = self._make_case("RX-1")
+        self._days = 14
+        text = self._remand_text(case)
+        self.assertIn("for a period of 14 days", text)
+
+    def test_custody_days_blank_when_omitted(self):
+        case = self._make_case("RX-2")
+        self._days = None
+        text = self._remand_text(case)
+        self.assertIn("______ days", text)
+
+    def test_endpoint_passes_custody_days(self):
+        case = self._make_case("RX-3")
+        from django.utils import timezone
+        import datetime
+        DiaryEvent.objects.create(case=case, timestamp=timezone.now(), event_type="ARREST",
+                                  description="Arrested.", actor=self.io)
+        resp = self.client.post(reverse("case-generate-remand", args=[case.id]) + "?custody_days=10")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        from io import BytesIO
+        from docx import Document as Docx
+        doc = Document.objects.get(case=case, doc_type="REMAND")
+        doc.file.open("rb")
+        try:
+            text = "\n".join(p.text for p in Docx(doc.file).paragraphs)
+        finally:
+            doc.file.close()
+        self.assertIn("for a period of 10 days", text)
+
+    def test_arrest_date_fallback_when_no_event(self):
+        """No ARREST diary event -> Remand uses the case's updated date, approx."""
+        case = self._make_case("RX-4")
+        self.assertFalse(case.diary.filter(event_type="ARREST").exists())
+        self._days = None
+        text = self._remand_text(case)
+        self.assertIn("approximate", text)              # clearly marked
+        self.assertNotIn("arrested on .", text)         # never a blank gap
+
+
+class RepealedActLabelTests(APITestCase):
+    """The old-act column is labelled 'Repealed Act Equivalent', not 'IPC'."""
+
+    def test_chargesheet_header_and_event_labels(self):
+        from io import BytesIO
+        from docx import Document as Docx
+        from core.documents import build_chargesheet_context_from_case, render_chargesheet
+
+        io = User.objects.create_user(username="io_rl", password="pw", role="IO")
+        case = Case.objects.create(case_number="RL-1", fir_number="F", fir_date="2026-06-01",
+                                   police_station="PS", incident_narrative="x", io=io)
+        sec = LegalSection.objects.create(code="BNS", section_number="305", title="Theft.", text="...", ipc_equivalent="380")
+        CaseSection.objects.create(case=case, section=sec, confirmed=True)
+        from django.utils import timezone
+        DiaryEvent.objects.create(case=case, timestamp=timezone.now(), event_type="FIR_REGISTERED",
+                                  description="FIR registered.", actor=io)
+
+        case.refresh_from_db()  # ensure fir_date is a real date
+        tpl = render_chargesheet(build_chargesheet_context_from_case(case))
+        buf = BytesIO(); tpl.save(buf); buf.seek(0)
+        doc = Docx(buf)
+        text = "\n".join(p.text for p in doc.paragraphs)
+        for table in doc.tables:
+            for row in table.rows:
+                text += "\n" + " | ".join(c.text for c in row.cells)
+
+        self.assertIn("Repealed Act Equivalent", text)   # renamed column header
+        self.assertNotIn("IPC Equivalent", text)
+        self.assertIn("FIR Registered", text)            # friendly diary label
+        self.assertNotIn("FIR_REGISTERED", text)

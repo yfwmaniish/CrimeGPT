@@ -30,6 +30,21 @@ FACEID_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "face_identification_form.docx"
 
 SUPPORTED_LANGS = ("en", "hi", "gu")
 
+# Friendly labels for diary event_type codes (matches the UI's i18n diary.events).
+EVENT_LABELS = {
+    "FIR_REGISTERED": "FIR Registered",
+    "INVESTIGATION": "Investigation",
+    "SEIZURE": "Seizure",
+    "DOCUMENT_GENERATED": "Document Generated",
+    "ARREST": "Arrest",
+    "STATEMENT_RECORDED": "Statement Recorded",
+    "MANUAL": "Note",
+}
+
+
+def event_label(event_type: str) -> str:
+    return EVENT_LABELS.get(event_type, event_type.replace("_", " ").title())
+
 # Seizure Receipt is the multilingual proof-of-concept: one template per language.
 SEIZURE_TEMPLATE_PATHS = {
     "en": DOC_TEMPLATE_DIR / "seizure_receipt.docx",
@@ -373,7 +388,8 @@ def build_remand_request_template(path: Path = REMAND_TEMPLATE_PATH) -> Path:
     doc.add_paragraph(
         "It is necessary to interrogate the accused in police custody for the "
         "purpose of investigation and recovery. It is therefore prayed that the "
-        "accused may be remanded to police custody for a period of ______ days."
+        "accused may be remanded to police custody for a period of "
+        "{{ custody_days }} days."
     )
 
     doc.add_paragraph()  # spacer
@@ -407,10 +423,16 @@ def confirmed_sections(case) -> list:
     ]
 
 
-def build_remand_context_from_case(case) -> dict:
+def build_remand_context_from_case(case, custody_days=None) -> dict:
     """Map a Case (+ accused, confirmed CaseSections, arrest details) to the
-    Remand Request context. Arrest details come from the latest ARREST diary
-    event. Only confirmed sections are included.
+    Remand Request context. Only confirmed sections are included.
+
+    Arrest details come from the latest ARREST diary event. If none exists, we
+    fall back to the case's last-updated date, clearly marked *approximate*, so
+    the document is never left with a blank arrest date.
+
+    ``custody_days`` is a one-time input for the requested custody period; if not
+    given, a blank fill-in line is rendered.
     """
 
     def fmt_date(d):
@@ -419,6 +441,18 @@ def build_remand_context_from_case(case) -> dict:
     accused = case.parties.filter(role="ACCUSED").first()
     officer = case.io
     arrest_event = case.diary.filter(event_type="ARREST").order_by("-timestamp").first()
+
+    if arrest_event:
+        arrest = {
+            "date": arrest_event.timestamp.strftime("%d-%m-%Y %H:%M"),
+            "details": arrest_event.description,
+        }
+    else:
+        # Fallback: no arrest entry recorded — use the last-updated date, approx.
+        arrest = {
+            "date": f"{fmt_date(case.updated_at)} (approximate)",
+            "details": "Arrest date approximate — no arrest entry was recorded for this case.",
+        }
 
     return {
         "today": timezone.localdate().strftime("%d-%m-%Y"),
@@ -441,10 +475,9 @@ def build_remand_context_from_case(case) -> dict:
             "address": accused.address if accused else "",
         },
         "sections": confirmed_sections(case),
-        "arrest": {
-            "date": arrest_event.timestamp.strftime("%d-%m-%Y %H:%M") if arrest_event else "",
-            "details": arrest_event.description if arrest_event else "",
-        },
+        "arrest": arrest,
+        # Blank fill-in line when the officer didn't specify a period.
+        "custody_days": custody_days if custody_days else "______",
     }
 
 
@@ -714,7 +747,7 @@ def build_chargesheet_template(path: Path = CHARGESHEET_TEMPLATE_PATH) -> Path:
             ("Code", "{{ s.code }}"),
             ("Section", "{{ s.section_number }}"),
             ("Title", "{{ s.title }}"),
-            ("IPC Equivalent", "{{ s.ipc_equivalent }}"),
+            ("Repealed Act Equivalent", "{{ s.ipc_equivalent }}"),
         ],
         "for s in sections",
     )
@@ -821,7 +854,7 @@ def build_chargesheet_context_from_case(case) -> dict:
     diary = [
         {
             "timestamp": fmt_dt(ev.timestamp),
-            "event_type": ev.event_type,
+            "event_type": event_label(ev.event_type),  # friendly label, not the raw code
             "description": ev.description,
         }
         for ev in case.diary.all().order_by("timestamp")

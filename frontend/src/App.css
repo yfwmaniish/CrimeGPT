@@ -379,3 +379,5 @@ code {
   border-radius: 8px;
   font: inherit;
 }
+
+.custody-days { width: 6.5rem; padding: 0.35rem 0.4rem; }

@@ -232,10 +232,19 @@ class CaseViewSet(viewsets.ModelViewSet):
     def generate_remand(self, request, pk=None):
         """Generate (or regenerate, versioned) the Police-Custody Remand Request.
 
-        Pulls only CONFIRMED sections and the latest ARREST diary event.
+        Pulls only CONFIRMED sections and the arrest details. ``?custody_days=N``
+        is a one-time input for the requested custody period (blank if omitted).
         """
         case = self.get_object()
-        rendered = render_remand_request(build_remand_context_from_case(case))
+        try:
+            custody_days = int(request.query_params.get("custody_days", ""))
+            if custody_days <= 0 or custody_days > 90:
+                custody_days = None
+        except (TypeError, ValueError):
+            custody_days = None
+        rendered = render_remand_request(
+            build_remand_context_from_case(case, custody_days=custody_days)
+        )
         return self._finalize_document(
             request, case,
             doc_type="REMAND", label="Remand Request",

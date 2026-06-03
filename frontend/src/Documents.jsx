@@ -20,6 +20,7 @@ export default function Documents({ caseId, user, onGenerated }) {
   const [busy, setBusy] = useState({});
   const [result, setResult] = useState({}); // key -> { version, download_url }
   const [error, setError] = useState({});
+  const [custodyDays, setCustodyDays] = useState(""); // one-time input for Remand
 
   const canGenerate = user.can_generate_documents;
 
@@ -28,9 +29,11 @@ export default function Documents({ caseId, user, onGenerated }) {
     setBusy((b) => ({ ...b, [key]: true }));
     try {
       const asPdf = (fmt[key] || "docx") === "pdf";
+      // Remand takes a one-time "custody days" input.
+      const extra = key === "remand" && custodyDays ? { custody_days: custodyDays } : {};
       // Pass the current UI language; only the Seizure Receipt has translated
       // templates so far — the others fall back to English server-side.
-      const data = await generateDocument(caseId, key, asPdf, i18n.language);
+      const data = await generateDocument(caseId, key, asPdf, i18n.language, extra);
       setResult((r) => ({ ...r, [key]: data }));
       triggerDownload(data.download_url);
       if (onGenerated) onGenerated(); // generation logged a diary event
@@ -65,6 +68,18 @@ export default function Documents({ caseId, user, onGenerated }) {
                 {r && <span className="good"> · v{r.version}</span>}
               </div>
               <div className="doc-actions">
+                {key === "remand" && (
+                  <input
+                    type="number"
+                    min="1"
+                    max="90"
+                    className="custody-days"
+                    value={custodyDays}
+                    onChange={(e) => setCustodyDays(e.target.value)}
+                    placeholder={t("documents.custodyDays")}
+                    title={t("documents.custodyDays")}
+                  />
+                )}
                 <select
                   value={format}
                   onChange={(e) => setFmt((f) => ({ ...f, [key]: e.target.value }))}

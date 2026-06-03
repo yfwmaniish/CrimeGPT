@@ -53,6 +53,7 @@ class Case(models.Model):
         on_delete=models.PROTECT,
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)  # used as an approximate fallback date
     history = HistoricalRecords()
 
     class Meta:
@@ -131,7 +132,11 @@ class LegalSection(models.Model):
     section_number = models.CharField(max_length=50)
     title = models.CharField(max_length=500)
     text = models.TextField()
-    ipc_equivalent = models.CharField(max_length=255, blank=True)  # the IPC->BNS bridge (can list several)
+    # Generic "repealed-act equivalent": IPC for BNS, CrPC for BNSS, Indian
+    # Evidence Act for BSA. Field name kept for the loader; label is friendly.
+    ipc_equivalent = models.CharField(
+        max_length=255, blank=True, verbose_name="Repealed Act equivalent"
+    )
     # 384-dim vector from all-MiniLM-L6-v2; populated by embed_legal_sections.
     embedding = VectorField(dimensions=384, null=True, blank=True)
 

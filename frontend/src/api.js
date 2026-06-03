@@ -84,10 +84,13 @@ export function generateSeizureReceipt(caseId) {
 // Generate any document type, optionally as PDF and in a given language. docType
 // is the URL segment (seizure, remand, custody, medical, panchanama, faceid,
 // chargesheet). Only the Seizure Receipt honours lang so far; others ignore it.
-export function generateDocument(caseId, docType, asPdf = false, lang = "en") {
+export function generateDocument(caseId, docType, asPdf = false, lang = "en", extra = {}) {
   const params = new URLSearchParams();
   if (asPdf) params.set("format", "pdf");
   if (lang && lang !== "en") params.set("lang", lang);
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== "" && v != null) params.set(k, v);
+  }
   const q = params.toString() ? `?${params}` : "";
   return request(`/api/cases/${caseId}/documents/${docType}/${q}`, { method: "POST" });
 }
