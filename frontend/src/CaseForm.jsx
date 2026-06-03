@@ -1,13 +1,11 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createCase, addDiaryEvent, ApiError } from "./api";
 
 const STATUSES = ["COMPLAINT", "INVESTIGATION", "ARREST", "CHARGESHEET"];
-const ROLES = [
-  ["VICTIM", "Victim / Complainant"],
-  ["ACCUSED", "Accused"],
-  ["WITNESS", "Witness"],
-];
-const GENDERS = ["Male", "Female", "Other"];
+const ROLES = ["VICTIM", "ACCUSED", "WITNESS"];
+// Gender values are stored canonically (English); only the labels are translated.
+const GENDERS = [["Male", "male"], ["Female", "female"], ["Other", "other"]];
 
 const emptyParty = () => ({
   role: "ACCUSED",
@@ -31,6 +29,7 @@ function flattenErrors(data, prefix = "") {
 }
 
 export default function CaseForm({ user, onCreated, onCancel }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState({
     case_number: "",
     fir_number: "",
@@ -109,37 +108,37 @@ export default function CaseForm({ user, onCreated, onCancel }) {
   return (
     <form className="stack" onSubmit={submitCase}>
       <button type="button" className="link-btn" onClick={onCancel}>
-        ← Back to my cases
+        {t("common.back")}
       </button>
       <section className="card">
-        <h2>Case details</h2>
+        <h2>{t("form.details")}</h2>
         <div className="grid2">
           <label>
-            Case number*
+            {t("form.caseNumber")}
             <input value={form.case_number} onChange={(e) => setField("case_number", e.target.value)} required />
           </label>
           <label>
-            FIR number*
+            {t("form.firNumber")}
             <input value={form.fir_number} onChange={(e) => setField("fir_number", e.target.value)} required />
           </label>
           <label>
-            FIR date*
+            {t("form.firDate")}
             <input type="date" value={form.fir_date} onChange={(e) => setField("fir_date", e.target.value)} required />
           </label>
           <label>
-            Police station*
+            {t("form.policeStation")}
             <input value={form.police_station} onChange={(e) => setField("police_station", e.target.value)} required />
           </label>
           <label>
-            Status
+            {t("form.status")}
             <select value={form.status} onChange={(e) => setField("status", e.target.value)}>
               {STATUSES.map((s) => (
-                <option key={s} value={s}>{s}</option>
+                <option key={s} value={s}>{t(`statuses.${s}`)}</option>
               ))}
             </select>
           </label>
           <label>
-            Place of incident
+            {t("form.placeOfIncident")}
             <input value={form.incident_place} onChange={(e) => setField("incident_place", e.target.value)} />
           </label>
         </div>
@@ -147,21 +146,21 @@ export default function CaseForm({ user, onCreated, onCancel }) {
         {form.status === "ARREST" && (
           <div className="grid2 arrest-fields">
             <label>
-              Arrest date
+              {t("form.arrestDate")}
               <input type="date" value={arrest.date} onChange={(e) => setArrest((a) => ({ ...a, date: e.target.value }))} />
             </label>
             <label>
-              Place of arrest
-              <input value={arrest.place} onChange={(e) => setArrest((a) => ({ ...a, place: e.target.value }))} placeholder="e.g. near Kalupur bus stand" />
+              {t("form.placeOfArrest")}
+              <input value={arrest.place} onChange={(e) => setArrest((a) => ({ ...a, place: e.target.value }))} placeholder={t("form.arrestPlacePlaceholder")} />
             </label>
             <p className="hint" style={{ gridColumn: "1 / -1", margin: 0 }}>
-              Recorded as an arrest entry in the case diary, and used by the Remand Request.
+              {t("form.arrestNote")}
             </p>
           </div>
         )}
 
         <label>
-          What happened (narrative)
+          {t("form.narrative")}
           <textarea
             rows={3}
             value={form.incident_narrative}
@@ -172,9 +171,9 @@ export default function CaseForm({ user, onCreated, onCancel }) {
 
       <section className="card">
         <div className="row-head">
-          <h2>People involved</h2>
+          <h2>{t("form.people")}</h2>
           <button type="button" className="add" onClick={() => setParties((p) => [...p, emptyParty()])}>
-            + Add person
+            {t("form.addPerson")}
           </button>
         </div>
         {parties.map((p, i) => (
@@ -183,7 +182,7 @@ export default function CaseForm({ user, onCreated, onCancel }) {
               <button
                 type="button"
                 className="del person-del"
-                title="Remove person"
+                title={t("form.removePerson")}
                 onClick={() => setParties((ps) => ps.filter((_, idx) => idx !== i))}
               >
                 ✕
@@ -191,29 +190,29 @@ export default function CaseForm({ user, onCreated, onCancel }) {
             )}
             <div className="person-grid">
               <select value={p.role} onChange={(e) => updateParty(i, "role", e.target.value)}>
-                {ROLES.map(([v, label]) => (
-                  <option key={v} value={v}>{label}</option>
+                {ROLES.map((v) => (
+                  <option key={v} value={v}>{t(`roles.${v}`)}</option>
                 ))}
               </select>
-              <input placeholder="Name" value={p.name} onChange={(e) => updateParty(i, "name", e.target.value)} />
-              <input placeholder="Father's/Husband's name" value={p.parent_name} onChange={(e) => updateParty(i, "parent_name", e.target.value)} />
+              <input placeholder={t("form.name")} value={p.name} onChange={(e) => updateParty(i, "name", e.target.value)} />
+              <input placeholder={t("form.parentName")} value={p.parent_name} onChange={(e) => updateParty(i, "parent_name", e.target.value)} />
               <input
                 type="number"
                 min="0"
-                placeholder="Age"
+                placeholder={t("form.age")}
                 value={p.age}
                 onChange={(e) => updateParty(i, "age", e.target.value)}
               />
               <select value={p.gender} onChange={(e) => updateParty(i, "gender", e.target.value)}>
-                <option value="">Gender…</option>
-                {GENDERS.map((g) => (
-                  <option key={g} value={g}>{g}</option>
+                <option value="">{t("form.genderPlaceholder")}</option>
+                {GENDERS.map(([value, key]) => (
+                  <option key={value} value={value}>{t(`genders.${key}`)}</option>
                 ))}
               </select>
-              <input placeholder="Phone" value={p.phone} onChange={(e) => updateParty(i, "phone", e.target.value)} />
+              <input placeholder={t("form.phone")} value={p.phone} onChange={(e) => updateParty(i, "phone", e.target.value)} />
               <input
                 className="person-address"
-                placeholder="Address"
+                placeholder={t("form.address")}
                 value={p.address}
                 onChange={(e) => updateParty(i, "address", e.target.value)}
               />
@@ -224,29 +223,29 @@ export default function CaseForm({ user, onCreated, onCancel }) {
 
       <section className="card">
         <div className="row-head">
-          <h2>Seized items</h2>
+          <h2>{t("form.items")}</h2>
           <button type="button" className="add" onClick={() => setItems((it) => [...it, emptyItem()])}>
-            + Add item
+            {t("form.addItem")}
           </button>
         </div>
         {items.map((it, i) => (
           <div className="subrow" key={i}>
-            <input placeholder="Description" value={it.description} onChange={(e) => updateItem(i, "description", e.target.value)} />
-            <input placeholder="Quantity" value={it.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} />
+            <input placeholder={t("form.description")} value={it.description} onChange={(e) => updateItem(i, "description", e.target.value)} />
+            <input placeholder={t("form.quantity")} value={it.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} />
             <select
               value={it.seized_from_index}
               onChange={(e) => updateItem(i, "seized_from_index", e.target.value)}
-              title="Seized from"
+              title={t("form.seizedFromNone")}
             >
-              <option value="">Seized from… (none)</option>
+              <option value="">{t("form.seizedFromNone")}</option>
               {parties.map((p, idx) => (
                 <option key={idx} value={idx}>
-                  {p.name || `Person ${idx + 1}`} ({p.role})
+                  {p.name || t("form.personN", { n: idx + 1 })} ({t(`roles.${p.role}`)})
                 </option>
               ))}
             </select>
-            <input type="date" title="Seizure date" value={it.seizure_date} onChange={(e) => updateItem(i, "seizure_date", e.target.value)} />
-            <input placeholder="Place of seizure" value={it.seizure_place} onChange={(e) => updateItem(i, "seizure_place", e.target.value)} />
+            <input type="date" title={t("form.seizureDate")} value={it.seizure_date} onChange={(e) => updateItem(i, "seizure_date", e.target.value)} />
+            <input placeholder={t("form.placeOfSeizure")} value={it.seizure_place} onChange={(e) => updateItem(i, "seizure_place", e.target.value)} />
             {items.length > 1 && (
               <button type="button" className="del" onClick={() => setItems((its) => its.filter((_, idx) => idx !== i))}>
                 ✕
@@ -258,7 +257,7 @@ export default function CaseForm({ user, onCreated, onCancel }) {
 
       {errors.length > 0 && (
         <section className="card bad-card">
-          <strong>Please fix the following:</strong>
+          <strong>{t("form.fixErrors")}</strong>
           <ul>
             {errors.map((e, i) => (
               <li key={i}>{e}</li>
@@ -268,7 +267,7 @@ export default function CaseForm({ user, onCreated, onCancel }) {
       )}
 
       <button type="submit" className="primary" disabled={busy}>
-        {busy ? "Saving…" : "Save case"}
+        {busy ? t("form.saving") : t("form.save")}
       </button>
     </form>
   );

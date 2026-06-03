@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { suggestSections, confirmSection, ApiError } from "./api";
 
 export default function Sections({ caseId, user }) {
+  const { t } = useTranslation();
   const [results, setResults] = useState(null); // null = not suggested yet
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -17,9 +19,9 @@ export default function Sections({ caseId, user }) {
       setResults(data.results);
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) {
-        setError("Add an incident narrative to the case first — that's what the AI matches against.");
+        setError(t("sections.needNarrative"));
       } else {
-        setError(err.message || "Could not get suggestions.");
+        setError(err.message || t("sections.getFailed"));
       }
     } finally {
       setLoading(false);
@@ -38,9 +40,9 @@ export default function Sections({ caseId, user }) {
       );
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
-        setError("Only an IO or SHO can confirm sections.");
+        setError(t("sections.onlyOfficer"));
       } else {
-        setError(err.message || "Could not update the section.");
+        setError(err.message || t("sections.updateFailed"));
       }
     } finally {
       setPending((p) => ({ ...p, [row.case_section_id]: false }));
@@ -49,19 +51,16 @@ export default function Sections({ caseId, user }) {
 
   return (
     <section className="card">
-      <h2>Applicable BNS sections</h2>
-      <p className="hint">
-        The AI suggests sections from the incident narrative (ranked by match).
-        You confirm the ones that apply — only confirmed sections go into documents.
-      </p>
+      <h2>{t("sections.title")}</h2>
+      <p className="hint">{t("sections.hint")}</p>
 
       <button onClick={suggest} disabled={loading}>
-        {loading ? "Analysing…" : results ? "Re-suggest" : "Suggest BNS Sections"}
+        {loading ? t("sections.analysing") : results ? t("sections.resuggest") : t("sections.suggest")}
       </button>
       {error && <p className="bad">✗ {error}</p>}
 
       {results && results.length === 0 && (
-        <p className="muted">No suggestions found.</p>
+        <p className="muted">{t("sections.none")}</p>
       )}
 
       {results && results.length > 0 && (
@@ -80,11 +79,11 @@ export default function Sections({ caseId, user }) {
                 <div className="section-head">
                   <span className="tag">{r.code} {r.section_number}</span>
                   <strong>{r.title}</strong>
-                  {r.confirmed && <span className="good"> ✓ confirmed</span>}
+                  {r.confirmed && <span className="good"> {t("sections.confirmed")}</span>}
                 </div>
                 <div className="section-meta muted">
-                  match {Math.round(r.similarity * 100)}%
-                  {r.ipc_equivalent ? ` · IPC ${r.ipc_equivalent}` : ""}
+                  {t("sections.match", { pct: Math.round(r.similarity * 100) })}
+                  {r.ipc_equivalent ? ` · ${t("sections.ipc", { ipc: r.ipc_equivalent })}` : ""}
                 </div>
               </div>
               <div className="section-bar" aria-hidden="true">
@@ -96,7 +95,7 @@ export default function Sections({ caseId, user }) {
       )}
 
       {results && !canConfirm && (
-        <p className="hint">Your role ({user.role_display}) can view suggestions but not confirm them.</p>
+        <p className="hint">{t("sections.cantConfirm", { role: user.role_display })}</p>
       )}
     </section>
   );

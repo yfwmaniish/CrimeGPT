@@ -21,7 +21,6 @@ from docx.shared import Pt
 from docxtpl import DocxTemplate
 
 DOC_TEMPLATE_DIR = Path(settings.BASE_DIR) / "core" / "doc_templates"
-SEIZURE_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "seizure_receipt.docx"
 REMAND_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "remand_request.docx"
 COURT_CUSTODY_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "court_custody_letter.docx"
 MEDICAL_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "medical_treatment_letter.docx"
@@ -29,15 +28,94 @@ CHARGESHEET_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "purvani_chargesheet.docx"
 PANCHANAMA_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "accused_panchanama.docx"
 FACEID_TEMPLATE_PATH = DOC_TEMPLATE_DIR / "face_identification_form.docx"
 
-# Columns of the seized-items table: (header label, per-row Jinja tag).
-_ITEM_COLUMNS = [
-    ("S.No", "{{ item.sno }}"),
-    ("Description", "{{ item.description }}"),
-    ("Quantity", "{{ item.quantity }}"),
-    ("Seized From", "{{ item.seized_from }}"),
-    ("Date", "{{ item.seizure_date }}"),
-    ("Place", "{{ item.seizure_place }}"),
+SUPPORTED_LANGS = ("en", "hi", "gu")
+
+# Seizure Receipt is the multilingual proof-of-concept: one template per language.
+SEIZURE_TEMPLATE_PATHS = {
+    "en": DOC_TEMPLATE_DIR / "seizure_receipt.docx",
+    "hi": DOC_TEMPLATE_DIR / "seizure_receipt_hi.docx",
+    "gu": DOC_TEMPLATE_DIR / "seizure_receipt_gu.docx",
+}
+SEIZURE_TEMPLATE_PATH = SEIZURE_TEMPLATE_PATHS["en"]  # back-compat default
+
+# The body Jinja tags are language-independent (same interpolation variables);
+# only the labels/boilerplate around them are translated. Section text and case
+# data are NEVER translated — accuracy/verbatim principle.
+_SEIZURE_ITEM_TAGS = [
+    "{{ item.sno }}",
+    "{{ item.description }}",
+    "{{ item.quantity }}",
+    "{{ item.seized_from }}",
+    "{{ item.seizure_date }}",
+    "{{ item.seizure_place }}",
 ]
+
+SEIZURE_LABELS = {
+    "en": {
+        "title": "SEIZURE RECEIPT (JABTI)",
+        "police_station": "Police Station: ",
+        "fir_no": "FIR No.: ",
+        "case_no": "Case No.: ",
+        "date": "Date: ",
+        "narrative": (
+            "I, {{ officer.name }}, {{ officer.role }}, of Police Station "
+            "{{ officer.police_station }}, have this day seized the following "
+            "article(s) in connection with the above-mentioned case from "
+            "{{ accused.name }}, child/spouse of {{ accused.parent_name }}, "
+            "resident of {{ accused.address }}:"
+        ),
+        "columns": ["S.No", "Description", "Quantity", "Seized From", "Date", "Place"],
+        "place_of_seizure": "Place of seizure: {{ case.incident_place }}",
+        "witnesses": (
+            "Witness(es): {% for w in witnesses %}{{ loop.index }}. {{ w.name }} "
+            "({{ w.address }}){% if not loop.last %}; {% endif %}{% endfor %}"
+        ),
+        "sig_person": "Signature of person from whom seized: __________________  ",
+        "sig_officer": "Signature of seizing officer: __________________  ",
+    },
+    "hi": {
+        "title": "ज़ब्ती रसीद",
+        "police_station": "पुलिस थाना: ",
+        "fir_no": "एफ.आई.आर. नं.: ",
+        "case_no": "केस नं.: ",
+        "date": "दिनांक: ",
+        "narrative": (
+            "मैं, {{ officer.name }}, {{ officer.role }}, पुलिस थाना "
+            "{{ officer.police_station }}, ने आज उपर्युक्त मामले के संबंध में "
+            "{{ accused.name }}, पिता/पति {{ accused.parent_name }}, निवासी "
+            "{{ accused.address }} से निम्नलिखित वस्तु(एँ) ज़ब्त की हैं:"
+        ),
+        "columns": ["क्र.सं.", "विवरण", "मात्रा", "किससे ज़ब्त", "दिनांक", "स्थान"],
+        "place_of_seizure": "ज़ब्ती का स्थान: {{ case.incident_place }}",
+        "witnesses": (
+            "गवाह: {% for w in witnesses %}{{ loop.index }}. {{ w.name }} "
+            "({{ w.address }}){% if not loop.last %}; {% endif %}{% endfor %}"
+        ),
+        "sig_person": "जिससे ज़ब्त किया गया उसके हस्ताक्षर: __________________  ",
+        "sig_officer": "ज़ब्त करने वाले अधिकारी के हस्ताक्षर: __________________  ",
+    },
+    "gu": {
+        "title": "જપ્તી રસીદ",
+        "police_station": "પોલીસ સ્ટેશન: ",
+        "fir_no": "એફ.આઈ.આર. નં.: ",
+        "case_no": "કેસ નં.: ",
+        "date": "તારીખ: ",
+        "narrative": (
+            "હું, {{ officer.name }}, {{ officer.role }}, પોલીસ સ્ટેશન "
+            "{{ officer.police_station }}, એ આજે ઉપરોક્ત કેસના સંબંધમાં "
+            "{{ accused.name }}, પિતા/પતિ {{ accused.parent_name }}, રહેવાસી "
+            "{{ accused.address }} પાસેથી નીચે મુજબની વસ્તુ(ઓ) જપ્ત કરી છે:"
+        ),
+        "columns": ["ક્રમ", "વર્ણન", "જથ્થો", "કોની પાસેથી", "તારીખ", "સ્થળ"],
+        "place_of_seizure": "જપ્તીનું સ્થળ: {{ case.incident_place }}",
+        "witnesses": (
+            "સાક્ષી(ઓ): {% for w in witnesses %}{{ loop.index }}. {{ w.name }} "
+            "({{ w.address }}){% if not loop.last %}; {% endif %}{% endfor %}"
+        ),
+        "sig_person": "જેની પાસેથી જપ્ત કર્યું તેની સહી: __________________  ",
+        "sig_officer": "જપ્ત કરનાર અધિકારીની સહી: __________________  ",
+    },
+}
 
 
 def _set_cell(cell, text, *, bold=False):
@@ -64,75 +142,72 @@ def _add_loop_table(doc, columns, loop_expr):
     return table
 
 
-def build_seizure_receipt_template(path: Path = SEIZURE_TEMPLATE_PATH) -> Path:
-    """Create the Seizure Receipt .docx template with docxtpl tags."""
-    path = Path(path)
+def build_seizure_receipt_template(path: Path = None, lang: str = "en") -> Path:
+    """Create the Seizure Receipt .docx template for ``lang`` (en/hi/gu).
+
+    Only labels/boilerplate are translated; the Jinja interpolation tags are
+    identical across languages, so the same render context fills any variant.
+    """
+    labels = SEIZURE_LABELS.get(lang, SEIZURE_LABELS["en"])
+    path = Path(path) if path is not None else SEIZURE_TEMPLATE_PATHS[lang]
     path.parent.mkdir(parents=True, exist_ok=True)
 
     doc = Document()
 
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("SEIZURE RECEIPT (JABTI)")
+    run = title.add_run(labels["title"])
     run.bold = True
     run.font.size = Pt(16)
 
     meta = doc.add_paragraph()
-    meta.add_run("Police Station: ").bold = True
+    meta.add_run(labels["police_station"]).bold = True
     meta.add_run("{{ case.police_station }}    ")
-    meta.add_run("FIR No.: ").bold = True
+    meta.add_run(labels["fir_no"]).bold = True
     meta.add_run("{{ case.fir_number }}    ")
-    meta.add_run("Case No.: ").bold = True
+    meta.add_run(labels["case_no"]).bold = True
     meta.add_run("{{ case.case_number }}")
 
     datep = doc.add_paragraph()
-    datep.add_run("Date: ").bold = True
+    datep.add_run(labels["date"]).bold = True
     datep.add_run("{{ today }}")
 
-    doc.add_paragraph(
-        "I, {{ officer.name }}, {{ officer.role }}, of Police Station "
-        "{{ officer.police_station }}, have this day seized the following "
-        "article(s) in connection with the above-mentioned case from "
-        "{{ accused.name }}, child/spouse of {{ accused.parent_name }}, "
-        "resident of {{ accused.address }}:"
-    )
+    doc.add_paragraph(labels["narrative"])
 
     # Seized-items table. docxtpl removes the rows that hold {%tr for%} and
-    # {%tr endfor%}, repeating the rows *between* them. So:
-    #   row0 = header, row1 = for-control, row2 = body (repeats), row3 = endfor.
-    table = doc.add_table(rows=4, cols=len(_ITEM_COLUMNS))
+    # {%tr endfor%}, repeating the rows *between* them (row0=header,
+    # row1=for-control, row2=body, row3=endfor).
+    table = doc.add_table(rows=4, cols=len(_SEIZURE_ITEM_TAGS))
     table.style = "Table Grid"
-    for col, (header, tag) in enumerate(_ITEM_COLUMNS):
-        _set_cell(table.rows[0].cells[col], header, bold=True)  # header row
-        _set_cell(table.rows[2].cells[col], tag)                # body row (repeats)
+    for col, (header, tag) in enumerate(zip(labels["columns"], _SEIZURE_ITEM_TAGS)):
+        _set_cell(table.rows[0].cells[col], header, bold=True)
+        _set_cell(table.rows[2].cells[col], tag)
     _set_cell(table.rows[1].cells[0], "{%tr for item in seized_items %}")
     _set_cell(table.rows[3].cells[0], "{%tr endfor %}")
 
-    doc.add_paragraph(
-        "Place of seizure: {{ case.incident_place }}"
-    )
-    doc.add_paragraph(
-        "Witness(es): {% for w in witnesses %}{{ loop.index }}. {{ w.name }} "
-        "({{ w.address }}){% if not loop.last %}; {% endif %}{% endfor %}"
-    )
+    doc.add_paragraph(labels["place_of_seizure"])
+    doc.add_paragraph(labels["witnesses"])
 
     doc.add_paragraph()  # spacer
     sig = doc.add_paragraph()
-    sig.add_run("Signature of person from whom seized: __________________  ")
+    sig.add_run(labels["sig_person"])
     sig.add_run("({{ accused.name }})")
     sig2 = doc.add_paragraph()
-    sig2.add_run("Signature of seizing officer: __________________  ")
+    sig2.add_run(labels["sig_officer"])
     sig2.add_run("({{ officer.name }}, {{ officer.role }})")
 
     doc.save(str(path))
     return path
 
 
-def render_seizure_receipt(context: dict, template_path: Path = SEIZURE_TEMPLATE_PATH) -> DocxTemplate:
-    """Render the Seizure Receipt template with ``context``.
+def render_seizure_receipt(context: dict, template_path: Path = None, lang: str = "en") -> DocxTemplate:
+    """Render the Seizure Receipt for ``lang`` (en/hi/gu).
 
-    Returns the DocxTemplate; the caller saves it (``.save(path_or_stream)``).
+    ``template_path`` overrides the language lookup (used in tests). Returns the
+    DocxTemplate; the caller saves it.
     """
+    if template_path is None:
+        template_path = SEIZURE_TEMPLATE_PATHS.get(lang, SEIZURE_TEMPLATE_PATH)
     tpl = DocxTemplate(str(template_path))
     tpl.render(context)
     return tpl

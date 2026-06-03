@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { login } from "./api";
 
 export default function Login({ onLoggedIn }) {
+  const { t } = useTranslation();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
@@ -15,7 +17,7 @@ export default function Login({ onLoggedIn }) {
       const user = await login(username.trim(), password);
       onLoggedIn(user);
     } catch (err) {
-      setError(err.message || "Login failed.");
+      setError(err.message || t("login.failed"));
     } finally {
       setBusy(false);
     }
@@ -23,12 +25,12 @@ export default function Login({ onLoggedIn }) {
 
   return (
     <main className="app narrow">
-      <h1>CrimeGPT</h1>
-      <p className="tagline">Sign in to continue</p>
+      <h1>{t("brand")}</h1>
+      <p className="tagline">{t("login.subtitle")}</p>
 
       <form className="card" onSubmit={submit}>
         <label>
-          Username
+          {t("login.username")}
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -37,7 +39,7 @@ export default function Login({ onLoggedIn }) {
           />
         </label>
         <label>
-          Password
+          {t("login.password")}
           <input
             type="password"
             value={password}
@@ -49,12 +51,9 @@ export default function Login({ onLoggedIn }) {
         {error && <p className="bad">✗ {error}</p>}
 
         <button type="submit" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
+          {busy ? t("login.signingIn") : t("login.signIn")}
         </button>
-        <p className="hint">
-          Generating documents requires an Investigating Officer (IO) or Station
-          House Officer (SHO) account.
-        </p>
+        <p className="hint">{t("login.hint")}</p>
       </form>
     </main>
   );

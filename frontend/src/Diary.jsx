@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getDiary, addDiaryEvent, ApiError } from "./api";
 
-// Friendly labels + icons for known auto-logged event types.
-const EVENT_META = {
-  FIR_REGISTERED: { label: "FIR Registered", icon: "📝" },
-  INVESTIGATION: { label: "Investigation", icon: "🔎" },
-  SEIZURE: { label: "Seizure", icon: "📦" },
-  DOCUMENT_GENERATED: { label: "Document Generated", icon: "📄" },
-  ARREST: { label: "Arrest", icon: "🚓" },
-  STATEMENT_RECORDED: { label: "Statement Recorded", icon: "🗣️" },
-  MANUAL: { label: "Note", icon: "✏️" },
+// Icons for known event types; labels come from i18n.
+const EVENT_ICONS = {
+  FIR_REGISTERED: "📝",
+  INVESTIGATION: "🔎",
+  SEIZURE: "📦",
+  DOCUMENT_GENERATED: "📄",
+  ARREST: "🚓",
+  STATEMENT_RECORDED: "🗣️",
+  MANUAL: "✏️",
 };
-
-function metaFor(type) {
-  return EVENT_META[type] || { label: type.replaceAll("_", " "), icon: "•" };
-}
 
 function fmt(ts) {
   try {
@@ -25,6 +22,9 @@ function fmt(ts) {
 }
 
 export default function Diary({ caseId, user, refreshSignal }) {
+  const { t } = useTranslation();
+  const eventLabel = (type) =>
+    t(`diary.events.${type}`, { defaultValue: type.replaceAll("_", " ") });
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -60,9 +60,9 @@ export default function Diary({ caseId, user, refreshSignal }) {
       load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 403) {
-        setAddError("Your role can view the diary but not add entries (IO/SHO only).");
+        setAddError(t("diary.cantAdd", { role: user.role_display }));
       } else {
-        setAddError(err.message || "Could not add the entry.");
+        setAddError(err.message || t("diary.failed"));
       }
     } finally {
       setAdding(false);
@@ -71,60 +71,59 @@ export default function Diary({ caseId, user, refreshSignal }) {
 
   return (
     <section className="card">
-      <h2>Case diary</h2>
+      <h2>{t("diary.title")}</h2>
 
-      {loading && <p className="muted">Loading…</p>}
+      {loading && <p className="muted">{t("common.loading")}</p>}
       {error && <p className="bad">✗ {error}</p>}
 
       {!loading && !error && events.length === 0 && (
-        <p className="muted">No events yet.</p>
+        <p className="muted">{t("diary.none")}</p>
       )}
 
       {events.length > 0 && (
         <ol className="timeline">
-          {events.map((ev) => {
-            const m = metaFor(ev.event_type);
-            return (
-              <li key={ev.id} className="timeline-item">
-                <span className="timeline-dot" aria-hidden="true">{m.icon}</span>
-                <div className="timeline-body">
-                  <div className="timeline-head">
-                    <span className="tag">{m.label}</span>
-                    <span className="muted">{fmt(ev.timestamp)}</span>
-                  </div>
-                  <p className="timeline-desc">{ev.description}</p>
-                  {ev.actor && <p className="muted">by {ev.actor}</p>}
+          {events.map((ev) => (
+            <li key={ev.id} className="timeline-item">
+              <span className="timeline-dot" aria-hidden="true">
+                {EVENT_ICONS[ev.event_type] || "•"}
+              </span>
+              <div className="timeline-body">
+                <div className="timeline-head">
+                  <span className="tag">{eventLabel(ev.event_type)}</span>
+                  <span className="muted">{fmt(ev.timestamp)}</span>
                 </div>
-              </li>
-            );
-          })}
+                <p className="timeline-desc">{ev.description}</p>
+                {ev.actor && <p className="muted">{t("diary.by", { actor: ev.actor })}</p>}
+              </div>
+            </li>
+          ))}
         </ol>
       )}
 
       {user.can_generate_documents ? (
         <form className="diary-add" onSubmit={submit}>
-          <h3>Add a step</h3>
+          <h3>{t("diary.addStep")}</h3>
           <div className="subrow">
             <input
-              placeholder="Type (optional, e.g. WITNESS_INTERVIEWED)"
+              placeholder={t("diary.typePlaceholder")}
               value={eventType}
               onChange={(e) => setEventType(e.target.value)}
             />
             <input
-              placeholder="What happened? (e.g. Interviewed the shopkeeper)"
+              placeholder={t("diary.descPlaceholder")}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               required
               style={{ flex: "2 1 220px" }}
             />
             <button type="submit" disabled={adding}>
-              {adding ? "Adding…" : "Add"}
+              {adding ? t("diary.adding") : t("diary.add")}
             </button>
           </div>
           {addError && <p className="bad">✗ {addError}</p>}
         </form>
       ) : (
-        <p className="hint">Your role ({user.role_display}) can view the diary but not add entries.</p>
+        <p className="hint">{t("diary.cantAdd", { role: user.role_display })}</p>
       )}
     </section>
   );

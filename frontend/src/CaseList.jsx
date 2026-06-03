@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { listCases } from "./api";
 
 function fmtDate(ts) {
@@ -10,6 +11,7 @@ function fmtDate(ts) {
 }
 
 export default function CaseList({ onOpen, onNew }) {
+  const { t } = useTranslation();
   const [cases, setCases] = useState(null);
   const [error, setError] = useState(null);
 
@@ -22,17 +24,17 @@ export default function CaseList({ onOpen, onNew }) {
   return (
     <div className="stack">
       <div className="row-head">
-        <h2>My cases</h2>
-        <button className="add" onClick={onNew}>+ New case</button>
+        <h2>{t("list.title")}</h2>
+        <button className="add" onClick={onNew}>{t("list.newCase")}</button>
       </div>
 
       {error && <p className="bad">✗ {error}</p>}
-      {!error && cases === null && <p className="muted">Loading…</p>}
+      {!error && cases === null && <p className="muted">{t("common.loading")}</p>}
 
       {cases && cases.length === 0 && (
         <section className="card">
-          <p className="muted">No cases yet.</p>
-          <button onClick={onNew}>Create your first case</button>
+          <p className="muted">{t("list.empty")}</p>
+          <button onClick={onNew}>{t("list.createFirst")}</button>
         </section>
       )}
 
@@ -41,11 +43,11 @@ export default function CaseList({ onOpen, onNew }) {
           <table className="case-table">
             <thead>
               <tr>
-                <th>Case no.</th>
-                <th>FIR no.</th>
-                <th>Police station</th>
-                <th>Status</th>
-                <th>Created</th>
+                <th>{t("list.colCase")}</th>
+                <th>{t("list.colFir")}</th>
+                <th>{t("list.colStation")}</th>
+                <th>{t("list.colStatus")}</th>
+                <th>{t("list.colCreated")}</th>
               </tr>
             </thead>
             <tbody>
@@ -55,7 +57,7 @@ export default function CaseList({ onOpen, onNew }) {
                   <td><strong>{c.case_number}</strong></td>
                   <td>{c.fir_number}</td>
                   <td>{c.police_station}</td>
-                  <td><span className="tag">{c.status}</span></td>
+                  <td><span className="tag">{t(`statuses.${c.status}`)}</span></td>
                   <td className="muted">{fmtDate(c.created_at)}</td>
                 </tr>
               ))}

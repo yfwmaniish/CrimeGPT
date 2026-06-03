@@ -222,6 +222,33 @@ The diary mixes **auto-logged** system events (e.g. `DOCUMENT_GENERATED`) with
 renders it as a vertical timeline; adding a step is gated to IO/SHO (same write
 RBAC as document generation), while anyone signed in can view.
 
+## Multilingual support — English / Hindi / Gujarati
+
+- **UI** is fully internationalized with `react-i18next` — strings live in
+  [frontend/src/locales/](frontend/src/locales/) (`en.json`, `hi.json`,
+  `gu.json`). The header language switcher persists the choice to `localStorage`.
+- **Input** is stored verbatim in UTF-8 — names, addresses, and narratives typed
+  in Devanagari or Gujarati round-trip with no transliteration (test:
+  `MultilingualTests.test_devanagari_and_gujarati_input_round_trips`).
+- **Documents (proof-of-concept):** the **Seizure Receipt** has translated
+  templates (`seizure_receipt_hi.docx`, `seizure_receipt_gu.docx`). Pass
+  `?lang=en|hi|gu` to its generation endpoint to pick one (default `en`); the UI
+  sends the current language automatically:
+
+  ```
+  POST /api/cases/{id}/documents/seizure/?lang=gu
+  ```
+
+  **Established pattern for the other six documents:** their builders in
+  [backend/core/documents.py](backend/core/documents.py) take a `labels` dict and
+  build from code — adding Hindi/Gujarati is a **translator-time task** (fill in a
+  `labels` dict per language and register the per-language template path), **not a
+  code change**. Only labels/boilerplate are translated.
+
+- **Never machine-translated:** BNS section text and document legal body content
+  are verbatim only (the Track A accuracy principle). Translated UI and template
+  **labels** — yes; translated section/legal **text** — no.
+
 ## Documents — Seizure Receipt (Day 3)
 
 The Word template lives at `backend/core/doc_templates/seizure_receipt.docx` and

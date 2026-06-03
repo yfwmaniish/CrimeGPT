@@ -19,6 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .documents import (
+    SUPPORTED_LANGS,
     build_chargesheet_context_from_case,
     build_court_custody_context_from_case,
     build_faceid_context_from_case,
@@ -200,13 +201,20 @@ class CaseViewSet(viewsets.ModelViewSet):
         permission_classes=[IsAuthenticated, CanGenerateDocuments],
     )
     def generate_seizure(self, request, pk=None):
-        """Generate (or regenerate, versioned) the Seizure Receipt for this case."""
+        """Generate (or regenerate, versioned) the Seizure Receipt for this case.
+
+        ``?lang=en|hi|gu`` selects the translated template (default en). Only the
+        Seizure Receipt is multilingual so far; the other documents ignore lang.
+        """
+        lang = request.query_params.get("lang", "en")
+        if lang not in SUPPORTED_LANGS:
+            lang = "en"
         case = self.get_object()
-        rendered = render_seizure_receipt(build_seizure_context_from_case(case))
+        rendered = render_seizure_receipt(build_seizure_context_from_case(case), lang=lang)
         return self._finalize_document(
             request, case,
             doc_type="SEIZURE", label="Seizure Receipt",
-            filename_prefix="seizure_receipt", rendered=rendered,
+            filename_prefix=f"seizure_receipt_{lang}", rendered=rendered,
         )
 
     @action(

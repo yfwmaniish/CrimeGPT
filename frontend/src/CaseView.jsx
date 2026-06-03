@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import Sections from "./Sections";
 import Documents from "./Documents";
 import Diary from "./Diary";
@@ -7,6 +8,7 @@ import Diary from "./Diary";
 // when reopening one from the case list. `caseData` needs at least { id,
 // case_number, fir_number, police_station, status }.
 export default function CaseView({ caseData, user, justCreated = false, onBack }) {
+  const { t } = useTranslation();
   const [diaryRefresh, setDiaryRefresh] = useState(0);
 
   return (
@@ -17,9 +19,9 @@ export default function CaseView({ caseData, user, justCreated = false, onBack }
           {caseData.case_number}
         </h2>
         <p className="muted">
-          FIR {caseData.fir_number}
+          {t("caseView.fir")} {caseData.fir_number}
           {caseData.police_station ? ` · ${caseData.police_station}` : ""}
-          {caseData.status ? ` · ${caseData.status}` : ""}
+          {caseData.status ? ` · ${t(`statuses.${caseData.status}`)}` : ""}
         </p>
       </section>
 
@@ -34,7 +36,7 @@ export default function CaseView({ caseData, user, justCreated = false, onBack }
       <Diary caseId={caseData.id} user={user} refreshSignal={diaryRefresh} />
 
       <button className="link-btn" onClick={onBack}>
-        ← Back to my cases
+        {t("common.back")}
       </button>
     </div>
   );

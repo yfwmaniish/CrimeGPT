@@ -1355,3 +1355,95 @@ class CaseListScopingTests(APITestCase):
         resp = self.client.get(reverse("case-detail", args=[self.other.id]))
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertEqual(resp.data["case_number"], "B-1")
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class MultilingualTests(APITestCase):
+    """Week 2: multilingual support — input round-trip + translated Seizure POC."""
+
+    # Devanagari + Gujarati sample data (stored verbatim, never transliterated).
+    GU_NAME = "ઇમરાન શેખ"          # "Imran Shaikh" in Gujarati
+    GU_PARENT = "યુસુફ શેખ"
+    GU_ADDR = "૫ જમાલપુર, અમદાવાદ"
+    HI_NARRATIVE = "अभियुक्त ने रात में दुकान का ताला तोड़कर चोरी की।"
+    GU_NARRATIVE = "આરોપીએ રાત્રે દુકાનનું તાળું તોડીને ચોરી કરી."
+
+    def setUp(self):
+        self.io = User.objects.create_user(username="io_ml", password="pw", role="IO", police_station="PS")
+        self.client.force_authenticate(self.io)
+
+    def test_devanagari_and_gujarati_input_round_trips(self):
+        """Names/addresses/narratives in Devanagari or Gujarati store and read
+        back byte-faithfully (UTF-8, no transliteration)."""
+        payload = {
+            "case_number": "ML-1", "fir_number": "0145/2026", "fir_date": "2026-05-28",
+            "police_station": "નવરંગપુરા", "incident_narrative": self.GU_NARRATIVE,
+            "parties": [{"role": "ACCUSED", "name": self.GU_NAME, "parent_name": self.GU_PARENT, "address": self.GU_ADDR}],
+        }
+        created = self.client.post(reverse("case-list"), payload, format="json")
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+
+        # Read back through the API.
+        data = self.client.get(reverse("case-detail", args=[created.data["id"]])).data
+        self.assertEqual(data["incident_narrative"], self.GU_NARRATIVE)
+        self.assertEqual(data["police_station"], "નવરંગપુરા")
+        self.assertEqual(data["parties"][0]["name"], self.GU_NAME)
+        self.assertEqual(data["parties"][0]["address"], self.GU_ADDR)
+
+        # And straight from the DB (no transliteration on the way in).
+        from core.models import Party
+        self.assertTrue(Party.objects.filter(name=self.GU_NAME, parent_name=self.GU_PARENT).exists())
+
+        # A Hindi narrative round-trips too.
+        p2 = dict(payload, case_number="ML-2", incident_narrative=self.HI_NARRATIVE, police_station="PS")
+        c2 = self.client.post(reverse("case-list"), p2, format="json")
+        got = self.client.get(reverse("case-detail", args=[c2.data["id"]])).data
+        self.assertEqual(got["incident_narrative"], self.HI_NARRATIVE)
+
+    def _docx_text(self, document):
+        from docx import Document as Docx
+        document.file.open("rb")
+        try:
+            doc = Docx(document.file)
+        finally:
+            document.file.close()
+        parts = [p.text for p in doc.paragraphs]
+        for t in doc.tables:
+            for row in t.rows:
+                parts.extend(c.text for c in row.cells)
+        return "\n".join(parts)
+
+    def test_seizure_lang_gu_renders_gujarati_labels_and_data(self):
+        case = Case.objects.create(
+            case_number="ML-GU", fir_number="F", fir_date="2026-05-28",
+            police_station="નવરંગપુરા", incident_place="રિલીફ રોડ",
+            incident_narrative=self.GU_NARRATIVE, io=self.io,
+        )
+        accused = Party.objects.create(case=case, role="ACCUSED", name=self.GU_NAME, parent_name=self.GU_PARENT, address=self.GU_ADDR)
+        SeizedItem.objects.create(case=case, description="મોબાઇલ ફોન", quantity="4", seized_from=accused)
+
+        url = reverse("case-generate-seizure", args=[case.id])
+        resp = self.client.post(url + "?lang=gu")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+
+        doc = Document.objects.get(case=case, doc_type="SEIZURE")
+        text = self._docx_text(doc)
+        # Gujarati labels from the translated template.
+        self.assertIn("જપ્તી રસીદ", text)        # title
+        self.assertIn("પોલીસ સ્ટેશન", text)        # "Police Station" label
+        # Gujarati case data interpolated (stored verbatim).
+        self.assertIn(self.GU_NAME, text)
+        self.assertIn("મોબાઇલ ફોન", text)
+        # Not the English labels.
+        self.assertNotIn("SEIZURE RECEIPT", text)
+
+    def test_seizure_defaults_to_english(self):
+        case = Case.objects.create(
+            case_number="ML-EN", fir_number="F", fir_date="2026-05-28",
+            police_station="PS", incident_narrative="theft", io=self.io,
+        )
+        Party.objects.create(case=case, role="ACCUSED", name="Ravi", address="x")
+        resp = self.client.post(reverse("case-generate-seizure", args=[case.id]))  # no lang
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        text = self._docx_text(Document.objects.get(case=case, doc_type="SEIZURE"))
+        self.assertIn("SEIZURE RECEIPT", text)
