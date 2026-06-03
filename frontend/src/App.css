@@ -349,3 +349,15 @@ code {
 @media (max-width: 560px) {
   .person-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* Case list table */
+.case-table { width: 100%; border-collapse: collapse; }
+.case-table th, .case-table td {
+  text-align: left;
+  padding: 0.55rem 0.5rem;
+  border-bottom: 1px solid #eef0f3;
+}
+.case-table th { font-size: 0.8rem; color: #6b7280; font-weight: 600; }
+.case-row { cursor: pointer; }
+.case-row:hover { background: #f4f7ff; }
+.case-row:focus { outline: 2px solid #2f6fed44; }

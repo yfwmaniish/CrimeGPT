@@ -1,8 +1,5 @@
 import { useState } from "react";
 import { createCase, addDiaryEvent, ApiError } from "./api";
-import Sections from "./Sections";
-import Documents from "./Documents";
-import Diary from "./Diary";
 
 const STATUSES = ["COMPLAINT", "INVESTIGATION", "ARREST", "CHARGESHEET"];
 const ROLES = [
@@ -33,7 +30,7 @@ function flattenErrors(data, prefix = "") {
   );
 }
 
-export default function CaseForm({ user }) {
+export default function CaseForm({ user, onCreated, onCancel }) {
   const [form, setForm] = useState({
     case_number: "",
     fir_number: "",
@@ -46,11 +43,8 @@ export default function CaseForm({ user }) {
   const [parties, setParties] = useState([emptyParty()]);
   const [items, setItems] = useState([emptyItem()]);
 
-  const [createdCase, setCreatedCase] = useState(null); // { id, case_number }
   const [errors, setErrors] = useState([]);
   const [busy, setBusy] = useState(false);
-
-  const [diaryRefresh, setDiaryRefresh] = useState(0);
   const [arrest, setArrest] = useState({ date: "", place: "" });
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -103,7 +97,7 @@ export default function CaseForm({ user }) {
         }
       }
 
-      setCreatedCase(created);
+      onCreated(created);
     } catch (err) {
       setErrors(err instanceof ApiError ? flattenErrors(err.data) : [err.message]);
     } finally {
@@ -111,37 +105,12 @@ export default function CaseForm({ user }) {
     }
   }
 
-  // ---- After the case is created: sections, documents, diary ----
-  if (createdCase) {
-    return (
-      <div className="stack">
-        <section className="card good-card">
-          <h2>✓ Case created</h2>
-          <p>
-            <strong>{createdCase.case_number}</strong> (FIR {createdCase.fir_number}) saved.
-          </p>
-        </section>
-
-        <Sections caseId={createdCase.id} user={user} />
-
-        <Documents
-          caseId={createdCase.id}
-          user={user}
-          onGenerated={() => setDiaryRefresh((n) => n + 1)}
-        />
-
-        <Diary caseId={createdCase.id} user={user} refreshSignal={diaryRefresh} />
-
-        <button className="link-btn" onClick={() => setCreatedCase(null)}>
-          ← Create another case
-        </button>
-      </div>
-    );
-  }
-
   // ---- The case creation form ----
   return (
     <form className="stack" onSubmit={submitCase}>
+      <button type="button" className="link-btn" onClick={onCancel}>
+        ← Back to my cases
+      </button>
       <section className="card">
         <h2>Case details</h2>
         <div className="grid2">

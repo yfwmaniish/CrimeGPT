@@ -117,6 +117,15 @@ class CaseViewSet(viewsets.ModelViewSet):
         .all()
     )
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # "My Cases": the list is scoped to the cases the officer owns. Detail and
+        # all other actions stay on the full set (so, e.g., an SHO can act on, and
+        # a Legal Advisor can view the diary of, a case another officer created).
+        if self.action == "list":
+            qs = qs.filter(io=self.request.user)
+        return qs
+
     def _finalize_document(self, request, case, *, doc_type, label, filename_prefix, rendered):
         """Shared generation tail: version (never overwrite), save the Document
         (.docx, plus PDF when requested), log a DiaryEvent, return the standard

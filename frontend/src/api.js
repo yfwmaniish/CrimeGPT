@@ -69,6 +69,12 @@ export function createCase(payload) {
   return request("/api/cases/", { method: "POST", body: payload });
 }
 
+// The requesting officer's cases (the list endpoint is scoped server-side),
+// newest first. Returns the paginated { count, results, ... } envelope.
+export function listCases() {
+  return request("/api/cases/");
+}
+
 export function generateSeizureReceipt(caseId) {
   return request(`/api/cases/${caseId}/documents/seizure/`, { method: "POST" });
 }

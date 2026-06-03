@@ -59,6 +59,10 @@ confirm step): **`admin` / `admin12345`** at http://localhost:8000/admin/.
 
 ## 2. Create the case — **[UI]**
 
+You land on **My cases** (your cases, newest first — empty on first run). Click
+**+ New case**. (Reopening later: just click a row to return to its full view —
+suggestions, documents, diary — exactly where you left off.)
+
 1. **Case details**: fill case number, FIR number, FIR date, police station; set
    **Status = INVESTIGATION**; place of incident; paste the narrative.
 2. **People involved** → **+ Add person** until you have four rows; set each

@@ -1327,3 +1327,31 @@ class FullyFilledDocumentTests(TestCase):
         self.assertIn("Male", medical)               # gender filled
         self.assertNotIn("aged  years", medical)     # no blank gap
         self.assertNotIn("{{", medical)
+
+
+class CaseListScopingTests(APITestCase):
+    """The case list ('My Cases') shows only the requesting officer's cases."""
+
+    def setUp(self):
+        self.io1 = User.objects.create_user(username="io_a", password="pw", role="IO")
+        self.io2 = User.objects.create_user(username="io_b", password="pw", role="IO")
+        Case.objects.create(case_number="A-1", fir_number="F", fir_date="2026-06-01", police_station="PS", io=self.io1)
+        Case.objects.create(case_number="A-2", fir_number="F", fir_date="2026-06-02", police_station="PS", io=self.io1)
+        self.other = Case.objects.create(case_number="B-1", fir_number="F", fir_date="2026-06-01", police_station="PS", io=self.io2)
+        self.list_url = reverse("case-list")
+
+    def test_list_shows_only_my_cases(self):
+        self.client.force_authenticate(self.io1)
+        resp = self.client.get(self.list_url)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        numbers = {c["case_number"] for c in resp.data["results"]}
+        self.assertEqual(numbers, {"A-1", "A-2"})
+        # newest-first ordering (A-2 created after A-1)
+        self.assertEqual(resp.data["results"][0]["case_number"], "A-2")
+
+    def test_detail_still_reachable_across_owners(self):
+        # Another officer's case is still openable by id (detail isn't scoped).
+        self.client.force_authenticate(self.io1)
+        resp = self.client.get(reverse("case-detail", args=[self.other.id]))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["case_number"], "B-1")
