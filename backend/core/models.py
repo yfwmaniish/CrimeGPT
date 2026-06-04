@@ -148,6 +148,29 @@ class LegalSection(models.Model):
         return f"{self.code} {self.section_number} — {self.title}"
 
 
+class LandmarkJudgment(models.Model):
+    """A landmark Indian judgment / case law, hand-curated from authoritative
+    sources. Linked to the BNS sections it most relates to, and embedded for
+    narrative-based retrieval."""
+
+    title = models.CharField(max_length=500)
+    citation = models.CharField(max_length=200, unique=True)  # natural key for upsert
+    year = models.IntegerField(null=True, blank=True)
+    court = models.CharField(max_length=200, blank=True)
+    summary = models.TextField()  # 2-4 sentence holding/significance, plain language
+    principle = models.CharField(max_length=500)  # one-line legal principle
+    sections = models.ManyToManyField(LegalSection, related_name="judgments", blank=True)
+    source = models.CharField(max_length=300, blank=True)  # provenance (URL / source)
+    # 384-dim vector from all-MiniLM-L6-v2; populated by embed_landmark_judgments.
+    embedding = VectorField(dimensions=384, null=True, blank=True)
+
+    class Meta:
+        ordering = ["title"]
+
+    def __str__(self):
+        return f"{self.title} ({self.citation})"
+
+
 class CaseSection(models.Model):
     """Which legal sections apply to a case (AI suggests, human confirms)."""
 
@@ -166,6 +189,27 @@ class CaseSection(models.Model):
     def __str__(self):
         state = "confirmed" if self.confirmed else "unconfirmed"
         return f"{self.section} on case {self.case_id} ({state})"
+
+
+class CaseJudgment(models.Model):
+    """Which landmark judgments relate to a case (AI suggests, officer applies).
+
+    Mirrors CaseSection: only judgments marked ``applied`` reach documents.
+    """
+
+    case = models.ForeignKey(Case, related_name="case_judgments", on_delete=models.CASCADE)
+    judgment = models.ForeignKey(
+        LandmarkJudgment, related_name="case_links", on_delete=models.PROTECT
+    )
+    suggested_by_ai = models.BooleanField(default=False)
+    applied = models.BooleanField(default=False)  # officer's explicit decision
+
+    class Meta:
+        unique_together = [("case", "judgment")]
+
+    def __str__(self):
+        state = "applied" if self.applied else "not applied"
+        return f"{self.judgment.citation} on case {self.case_id} ({state})"
 
 
 class DiaryEvent(models.Model):

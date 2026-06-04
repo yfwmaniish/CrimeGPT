@@ -10,9 +10,11 @@ from simple_history.admin import SimpleHistoryAdmin
 
 from .models import (
     Case,
+    CaseJudgment,
     CaseSection,
     DiaryEvent,
     Document,
+    LandmarkJudgment,
     LegalSection,
     Party,
     SeizedItem,
@@ -110,6 +112,21 @@ class CaseSectionAdmin(admin.ModelAdmin):
     list_display = ("case", "section", "suggested_by_ai", "confirmed")
     list_filter = ("suggested_by_ai", "confirmed")
     autocomplete_fields = ("section",)
+
+
+@admin.register(LandmarkJudgment)
+class LandmarkJudgmentAdmin(admin.ModelAdmin):
+    list_display = ("title", "citation", "year", "court")
+    search_fields = ("title", "citation", "summary", "principle")
+    autocomplete_fields = ("sections",)
+    filter_horizontal = ("sections",)
+
+
+@admin.register(CaseJudgment)
+class CaseJudgmentAdmin(admin.ModelAdmin):
+    list_display = ("case", "judgment", "suggested_by_ai", "applied")
+    list_filter = ("suggested_by_ai", "applied")
+    autocomplete_fields = ("judgment",)
 
 
 @admin.register(DiaryEvent)

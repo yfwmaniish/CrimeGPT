@@ -392,6 +392,15 @@ def build_remand_request_template(path: Path = REMAND_TEMPLATE_PATH) -> Path:
         "{{ custody_days }} days."
     )
 
+    # Relevant Case Laws — only judgments the officer has applied. Empty list
+    # renders just the header row (no broken layout).
+    _add_section_heading(doc, "Relevant Case Laws")
+    _add_loop_table(
+        doc,
+        [("Title", "{{ j.title }}"), ("Citation", "{{ j.citation }}"), ("Principle", "{{ j.principle }}")],
+        "for j in judgments",
+    )
+
     doc.add_paragraph()  # spacer
     sig = doc.add_paragraph()
     sig.add_run("Signature of Investigating Officer: __________________  ")
@@ -406,6 +415,20 @@ def render_remand_request(context: dict, template_path: Path = REMAND_TEMPLATE_P
     tpl = DocxTemplate(str(template_path))
     tpl.render(context)
     return tpl
+
+
+def applied_judgments(case) -> list:
+    """The case's APPLIED landmark judgments as plain dicts. Never includes
+    AI-suggested-but-unapplied judgments — same boundary as confirmed sections.
+    """
+    return [
+        {
+            "title": cj.judgment.title,
+            "citation": cj.judgment.citation,
+            "principle": cj.judgment.principle,
+        }
+        for cj in case.case_judgments.filter(applied=True).select_related("judgment")
+    ]
 
 
 def confirmed_sections(case) -> list:
@@ -475,6 +498,7 @@ def build_remand_context_from_case(case, custody_days=None) -> dict:
             "address": accused.address if accused else "",
         },
         "sections": confirmed_sections(case),
+        "judgments": applied_judgments(case),
         "arrest": arrest,
         # Blank fill-in line when the officer didn't specify a period.
         "custody_days": custody_days if custody_days else "______",
@@ -752,7 +776,14 @@ def build_chargesheet_template(path: Path = CHARGESHEET_TEMPLATE_PATH) -> Path:
         "for s in sections",
     )
 
-    _add_section_heading(doc, "3. Seized Items")
+    _add_section_heading(doc, "3. Relevant Case Laws (applied)")
+    _add_loop_table(
+        doc,
+        [("Title", "{{ j.title }}"), ("Citation", "{{ j.citation }}"), ("Principle", "{{ j.principle }}")],
+        "for j in judgments",
+    )
+
+    _add_section_heading(doc, "4. Seized Items")
     _add_loop_table(
         doc,
         [
@@ -766,7 +797,7 @@ def build_chargesheet_template(path: Path = CHARGESHEET_TEMPLATE_PATH) -> Path:
         "for item in seized_items",
     )
 
-    _add_section_heading(doc, "4. Statements Recorded")
+    _add_section_heading(doc, "5. Statements Recorded")
     _add_loop_table(
         doc,
         [
@@ -777,7 +808,7 @@ def build_chargesheet_template(path: Path = CHARGESHEET_TEMPLATE_PATH) -> Path:
         "for st in statements",
     )
 
-    _add_section_heading(doc, "5. Case Diary Summary")
+    _add_section_heading(doc, "6. Case Diary Summary")
     _add_loop_table(
         doc,
         [
@@ -788,7 +819,7 @@ def build_chargesheet_template(path: Path = CHARGESHEET_TEMPLATE_PATH) -> Path:
         "for ev in diary",
     )
 
-    _add_section_heading(doc, "6. Brief Facts")
+    _add_section_heading(doc, "7. Brief Facts")
     doc.add_paragraph("{{ case.incident_narrative }}")
 
     doc.add_paragraph()  # spacer
@@ -878,6 +909,7 @@ def build_chargesheet_context_from_case(case) -> dict:
         },
         "parties": parties,
         "sections": confirmed_sections(case),
+        "judgments": applied_judgments(case),
         "seized_items": seized_items,
         "statements": statements,
         "diary": diary,

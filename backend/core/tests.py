@@ -1592,3 +1592,112 @@ class RepealedActLabelTests(APITestCase):
         self.assertNotIn("IPC Equivalent", text)
         self.assertIn("FIR Registered", text)            # friendly diary label
         self.assertNotIn("FIR_REGISTERED", text)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class LandmarkJudgmentTests(APITestCase):
+    """Phase 2: landmark judgments — seed, retrieval (section + narrative),
+    apply, applied-only in documents, RBAC."""
+
+    def setUp(self):
+        from core.models import LandmarkJudgment, CaseJudgment
+        self.LJ = LandmarkJudgment
+        self.CJ = CaseJudgment
+        self.io = User.objects.create_user(username="io_j", password="pw", role="IO", police_station="PS")
+        self.legal = User.objects.create_user(username="legal_j", password="pw", role="LEGAL")
+        # Minimal BNS section corpus.
+        self.theft = LegalSection.objects.create(code="BNS", section_number="303", title="Theft.", text="...")
+        self.murder = LegalSection.objects.create(code="BNS", section_number="103", title="Punishment for murder.", text="...")
+        # Judgments (synthetic but realistic) + section links.
+        self.j_theft = LandmarkJudgment.objects.create(
+            title="Pyare Lal Bhargava v. State of Rajasthan", citation="AIR 1963 SC 1094",
+            year=1963, court="Supreme Court of India",
+            summary="Temporary removal of files was theft; permanent deprivation not required.",
+            principle="Even temporary dishonest removal of movable property amounts to theft.")
+        self.j_theft.sections.set([self.theft])
+        self.j_murder = LandmarkJudgment.objects.create(
+            title="Virsa Singh v. State of Punjab", citation="AIR 1958 SC 465",
+            year=1958, court="Supreme Court of India",
+            summary="Four-part test for murder by an intentional bodily injury sufficient to cause death.",
+            principle="The injury must be both intended and sufficient in the ordinary course of nature to cause death.")
+        self.j_murder.sections.set([self.murder])
+        self.case = Case.objects.create(
+            case_number="J-1", fir_number="F", fir_date="2026-06-01", police_station="PS",
+            incident_narrative="The accused broke into a shop at night and stole mobile phones and cash.",
+            io=self.io)
+        Party.objects.create(case=self.case, role="ACCUSED", name="Imran", address="x")
+        CaseSection.objects.create(case=self.case, section=self.theft, confirmed=True)  # theft confirmed
+        from django.core.management import call_command
+        call_command("embed_landmark_judgments")
+
+    # -- loader --
+    def test_loader_seeds_and_links_sections(self):
+        from django.core.management import call_command
+        csv_text = (
+            "title,citation,year,court,summary,principle,bns_sections,source\n"
+            "Test Case v. State,TEST 2026 SC 1,2026,Supreme Court of India,A summary.,A principle.,303,http://example.test\n"
+        )
+        path = Path(tempfile.mkdtemp()) / "lj.csv"
+        path.write_text(csv_text, encoding="utf-8")
+        call_command("load_landmark_judgments", str(path))
+        j = self.LJ.objects.get(citation="TEST 2026 SC 1")
+        self.assertEqual(list(j.sections.values_list("section_number", flat=True)), ["303"])
+        # idempotent re-run
+        before = self.LJ.objects.count()
+        call_command("load_landmark_judgments", str(path))
+        self.assertEqual(self.LJ.objects.count(), before)
+
+    # -- retrieval by confirmed section --
+    def test_judgments_by_confirmed_section(self):
+        self.client.force_authenticate(self.io)
+        resp = self.client.get(reverse("case-judgments", args=[self.case.id]))
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        citations = {r["citation"] for r in resp.data["results"]}
+        self.assertIn("AIR 1963 SC 1094", citations)       # theft judgment (303 confirmed)
+        self.assertNotIn("AIR 1958 SC 465", citations)     # murder (103 not confirmed)
+
+    # -- retrieval by narrative --
+    def test_suggest_by_narrative_ranks_theft_first(self):
+        self.client.force_authenticate(self.io)
+        resp = self.client.post(reverse("case-suggest-judgments", args=[self.case.id]) + "?n=2")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED if resp.status_code == 201 else status.HTTP_200_OK)
+        results = resp.data["results"]
+        self.assertGreaterEqual(len(results), 1)
+        # the theft judgment outranks the murder judgment for a theft narrative
+        sims = {r["citation"]: r["similarity"] for r in results}
+        self.assertIn("AIR 1963 SC 1094", sims)
+        if "AIR 1958 SC 465" in sims:
+            self.assertGreater(sims["AIR 1963 SC 1094"], sims["AIR 1958 SC 465"])
+        # recorded as suggested CaseJudgments
+        self.assertTrue(self.CJ.objects.filter(case=self.case, judgment=self.j_theft).exists())
+
+    # -- apply + RBAC --
+    def test_apply_requires_io_or_sho(self):
+        url = reverse("case-apply-judgment", args=[self.case.id, self.j_theft.id])
+        self.client.force_authenticate(self.legal)
+        self.assertEqual(self.client.post(url, {"applied": True}, format="json").status_code, status.HTTP_403_FORBIDDEN)
+        self.client.force_authenticate(self.io)
+        r = self.client.post(url, {"applied": True}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK, r.data)
+        self.assertTrue(r.data["applied"])
+        self.assertTrue(self.CJ.objects.get(case=self.case, judgment=self.j_theft).applied)
+
+    # -- only applied judgments reach documents --
+    def test_only_applied_judgments_in_chargesheet(self):
+        from io import BytesIO
+        from docx import Document as Docx
+        from core.documents import build_chargesheet_context_from_case, render_chargesheet
+        # Apply theft, leave murder unapplied.
+        self.CJ.objects.create(case=self.case, judgment=self.j_theft, applied=True)
+        self.CJ.objects.create(case=self.case, judgment=self.j_murder, applied=False)
+        self.case.refresh_from_db()
+        tpl = render_chargesheet(build_chargesheet_context_from_case(self.case))
+        buf = BytesIO(); tpl.save(buf); buf.seek(0)
+        doc = Docx(buf)
+        text = "\n".join(p.text for p in doc.paragraphs)
+        for tbl in doc.tables:
+            for row in tbl.rows:
+                text += "\n" + " | ".join(c.text for c in row.cells)
+        self.assertIn("AIR 1963 SC 1094", text)        # applied -> present
+        self.assertNotIn("AIR 1958 SC 465", text)      # not applied -> absent
+        self.assertNotIn("{{", text)

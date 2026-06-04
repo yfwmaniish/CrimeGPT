@@ -36,7 +36,15 @@ from .documents import (
     render_remand_request,
     render_seizure_receipt,
 )
-from .models import Case, CaseSection, DiaryEvent, Document, LegalSection
+from .models import (
+    Case,
+    CaseJudgment,
+    CaseSection,
+    DiaryEvent,
+    Document,
+    LandmarkJudgment,
+    LegalSection,
+)
 from .pdf import convert_docx_to_pdf
 from .serializers import CaseSerializer, DiaryEventSerializer
 
@@ -469,3 +477,112 @@ class CaseViewSet(viewsets.ModelViewSet):
                 "confirmed": case_section.confirmed,
             }
         )
+
+    # ------------------------------------------------------------------ #
+    # Landmark judgments / case laws
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _judgment_dict(judgment, applied, similarity=None):
+        data = {
+            "id": judgment.id,
+            "title": judgment.title,
+            "citation": judgment.citation,
+            "year": judgment.year,
+            "court": judgment.court,
+            "principle": judgment.principle,
+            "summary": judgment.summary,
+            "applied": applied,
+        }
+        if similarity is not None:
+            data["similarity"] = similarity
+        return data
+
+    @action(detail=True, methods=["get"], url_path="judgments", url_name="judgments")
+    def judgments(self, request, pk=None):
+        """Judgments relevant to this case's CONFIRMED sections, each with whether
+        the officer has applied it. Read-only; any authenticated user."""
+        case = self.get_object()
+        confirmed_section_ids = case.applied_sections.filter(confirmed=True).values_list(
+            "section_id", flat=True
+        )
+        applied_map = {cj.judgment_id: cj.applied for cj in case.case_judgments.all()}
+        judgments = (
+            LandmarkJudgment.objects.filter(sections__in=confirmed_section_ids)
+            .distinct()
+            .order_by("title")
+        )
+        results = [self._judgment_dict(j, applied_map.get(j.id, False)) for j in judgments]
+        return Response({"count": len(results), "results": results})
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="suggest-judgments",
+        url_name="suggest-judgments",
+        permission_classes=[IsAuthenticated],
+    )
+    def suggest_judgments(self, request, pk=None):
+        """Suggest landmark judgments by similarity to the incident narrative.
+        Records each as a CaseJudgment (suggested_by_ai=True, applied=False);
+        AI suggests, the officer applies. Returns citation + one-line principle."""
+        from pgvector.django import CosineDistance
+
+        from .embeddings import embed_text
+
+        case = self.get_object()
+        narrative = (case.incident_narrative or "").strip()
+        if not narrative:
+            return Response(
+                {"detail": "This case has no incident_narrative to analyse."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            top_n = int(request.query_params.get("n", 5))
+        except (TypeError, ValueError):
+            top_n = 5
+        top_n = max(1, min(top_n, 25))
+
+        query_vector = embed_text(narrative)
+        candidates = (
+            LandmarkJudgment.objects.filter(embedding__isnull=False)
+            .annotate(distance=CosineDistance("embedding", query_vector))
+            .order_by("distance")[:top_n]
+        )
+        results = []
+        with transaction.atomic():
+            for judgment in candidates:
+                case_judgment, _ = CaseJudgment.objects.get_or_create(
+                    case=case,
+                    judgment=judgment,
+                    defaults={"suggested_by_ai": True, "applied": False},
+                )
+                results.append(
+                    self._judgment_dict(
+                        judgment,
+                        case_judgment.applied,
+                        similarity=round(1.0 - float(judgment.distance), 4),
+                    )
+                )
+        return Response({"count": len(results), "results": results})
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"judgments/(?P<judgment_id>[^/.]+)/apply",
+        url_name="apply-judgment",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+    )
+    def apply_judgment(self, request, pk=None, judgment_id=None):
+        """Mark a judgment as applied (or not) to this case — the officer's
+        explicit decision. Body: ``{"applied": true|false}`` (defaults true).
+        Only applied judgments reach documents."""
+        case = self.get_object()
+        try:
+            judgment = LandmarkJudgment.objects.get(id=judgment_id)
+        except LandmarkJudgment.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        case_judgment, _ = CaseJudgment.objects.get_or_create(case=case, judgment=judgment)
+        case_judgment.applied = bool(request.data.get("applied", True))
+        case_judgment.save(update_fields=["applied"])
+        return Response(self._judgment_dict(judgment, case_judgment.applied))

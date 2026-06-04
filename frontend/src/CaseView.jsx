@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import Sections from "./Sections";
+import Judgments from "./Judgments";
 import Documents from "./Documents";
 import Diary from "./Diary";
 
@@ -26,6 +27,8 @@ export default function CaseView({ caseData, user, justCreated = false, onBack }
       </section>
 
       <Sections caseId={caseData.id} user={user} />
+
+      <Judgments caseId={caseData.id} user={user} />
 
       <Documents
         caseId={caseData.id}

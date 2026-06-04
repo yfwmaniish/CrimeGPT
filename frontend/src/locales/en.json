@@ -106,6 +106,18 @@
     "formatDocx": "DOCX",
     "formatPdf": "PDF"
   },
+  "judgments": {
+    "title": "Relevant judgments",
+    "hint": "Case laws linked to your confirmed sections appear here. You can also suggest more by narrative. Mark the ones that apply — only applied judgments go into documents.",
+    "suggest": "Suggest by narrative",
+    "suggesting": "Analysing…",
+    "none": "No judgments yet — confirm sections above or suggest by narrative.",
+    "applied": "✓ applied",
+    "onlyOfficer": "Only an IO or SHO can apply judgments.",
+    "updateFailed": "Could not update the judgment.",
+    "getFailed": "Could not get judgments.",
+    "cantApply": "Your role ({{role}}) can view judgments but not apply them."
+  },
   "docTypes": {
     "seizure": "Seizure Receipt",
     "remand": "Remand Request",

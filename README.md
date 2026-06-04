@@ -238,6 +238,30 @@ The diary mixes **auto-logged** system events (e.g. `DOCUMENT_GENERATED`) with
 renders it as a vertical timeline; adding a step is gated to IO/SHO (same write
 RBAC as document generation), while anyone signed in can view.
 
+## Landmark judgments / case laws (Phase 2)
+
+Hand-curated landmark Indian judgments (`backend/data/landmark_judgments.csv`),
+each with a verified citation, plain-language summary, one-line principle, links
+to the BNS sections it relates to, and a `source`. **Verbatim/curated only** —
+citations and holdings come from authoritative sources, never generated.
+
+```sh
+docker compose exec web python manage.py load_landmark_judgments data/landmark_judgments.csv
+docker compose exec web python manage.py embed_landmark_judgments
+```
+
+Two retrieval surfaces on the case view (between Sections and Documents):
+- **By confirmed sections** — `GET /api/cases/{id}/judgments/` lists judgments
+  linked to the case's confirmed sections.
+- **By narrative** — `POST /api/cases/{id}/suggest-judgments/` ranks judgments by
+  similarity to the incident narrative (returns citation + one-line principle).
+
+Same **AI suggests, officer applies** rule: the officer marks a judgment applied
+via `POST /api/cases/{id}/judgments/{judgment_id}/apply/` (IO/SHO only). **Only
+applied judgments** appear in the **Relevant Case Laws** section of the Remand
+Request and Purvani Chargesheet — mirroring confirmed sections. The set is
+curated/verified and easy to extend (add rows to the CSV, reload, re-embed).
+
 ## Multilingual support — English / Hindi / Gujarati
 
 - **UI** is fully internationalized with `react-i18next` — strings live in

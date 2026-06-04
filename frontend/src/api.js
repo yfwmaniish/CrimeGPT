@@ -106,6 +106,20 @@ export function confirmSection(caseId, caseSectionId, confirmed) {
   });
 }
 
+// Landmark judgments / case laws.
+export function getJudgments(caseId) {
+  return request(`/api/cases/${caseId}/judgments/`); // relevant to confirmed sections
+}
+export function suggestJudgments(caseId, n = 5) {
+  return request(`/api/cases/${caseId}/suggest-judgments/?n=${n}`, { method: "POST" });
+}
+export function applyJudgment(caseId, judgmentId, applied) {
+  return request(`/api/cases/${caseId}/judgments/${judgmentId}/apply/`, {
+    method: "POST",
+    body: { applied },
+  });
+}
+
 export function getDiary(caseId) {
   return request(`/api/cases/${caseId}/diary/`);
 }

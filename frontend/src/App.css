@@ -381,3 +381,17 @@ code {
 }
 
 .custody-days { width: 6.5rem; padding: 0.35rem 0.4rem; }
+
+/* Judgments panel */
+.judgment-list { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+.judgment-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.55rem 0.5rem;
+  border-bottom: 1px solid #eef0f3;
+}
+.judgment-row.applied { background: #f0fbf4; }
+.judgment-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.judgment-principle { margin: 0.2rem 0 0; color: #4b5563; font-size: 0.9rem; }
