@@ -130,4 +130,43 @@ export function addDiaryEvent(caseId, { event_type, description, timestamp }) {
   return request(`/api/cases/${caseId}/diary/`, { method: "POST", body });
 }
 
+// --- Multipart upload helper (FormData; do NOT set Content-Type) ---
+async function upload(path, formData, method = "POST") {
+  const headers = {};
+  const token = getToken();
+  if (token) headers["Authorization"] = `Token ${token}`;
+  const res = await fetch(`${API_BASE}${path}`, { method, headers, body: formData });
+  if (res.status === 204) return null;
+  const text = await res.text();
+  let data = null;
+  if (text) { try { data = JSON.parse(text); } catch { data = text; } }
+  if (!res.ok) throw new ApiError(res.status, data);
+  return data;
+}
+
+// --- Evidence images ---
+export function listEvidence(caseId, tag = "") {
+  const params = new URLSearchParams({ case: caseId });
+  if (tag) params.set("tag", tag);
+  return request(`/api/evidence/?${params}`);
+}
+export function uploadEvidence(caseId, { file, description, tags }) {
+  const fd = new FormData();
+  fd.append("case", caseId);
+  fd.append("image", file);
+  if (description) fd.append("description", description);
+  if (tags) fd.append("tags", tags);
+  return upload("/api/evidence/", fd);
+}
+export function deleteEvidence(id) {
+  return request(`/api/evidence/${id}/`, { method: "DELETE" });
+}
+
+// --- Party (accused) photo ---
+export function uploadPartyPhoto(caseId, partyId, file) {
+  const fd = new FormData();
+  fd.append("photo", file);
+  return upload(`/api/cases/${caseId}/parties/${partyId}/photo/`, fd);
+}
+
 export { API_BASE };

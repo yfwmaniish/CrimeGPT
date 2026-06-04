@@ -14,6 +14,7 @@ from .models import (
     CaseSection,
     DiaryEvent,
     Document,
+    EvidenceImage,
     LandmarkJudgment,
     LegalSection,
     Party,
@@ -141,3 +142,10 @@ class DocumentAdmin(admin.ModelAdmin):
     list_display = ("case", "doc_type", "version", "generated_at")
     list_filter = ("doc_type",)
     readonly_fields = ("generated_at",)
+
+
+@admin.register(EvidenceImage)
+class EvidenceImageAdmin(admin.ModelAdmin):
+    list_display = ("case", "description", "tags", "uploaded_by", "uploaded_at")
+    search_fields = ("description", "tags")
+    readonly_fields = ("uploaded_at",)

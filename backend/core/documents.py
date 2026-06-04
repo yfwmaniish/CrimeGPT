@@ -1090,12 +1090,13 @@ def build_faceid_template(path: Path = FACEID_TEMPLATE_PATH) -> Path:
     doc.add_paragraph("Age: {{ accused.age }}    Gender: {{ accused.gender }}")
     doc.add_paragraph("Address: {{ accused.address }}")
 
-    # Photo placeholder box (no image field on Party yet -- see TODO above).
+    # Photo box: render the accused's photo (InlineImage) if available, else a
+    # placeholder string — both are passed as the ``photo`` context variable.
     photo = doc.add_table(rows=1, cols=1)
     photo.style = "Table Grid"
     cell = photo.rows[0].cells[0]
     cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _set_cell(cell, "[ AFFIX RECENT PHOTOGRAPH OF THE ACCUSED HERE ]")
+    _set_cell(cell, "{{ photo }}")
     photo.rows[0].height = Pt(140)
 
     doc.add_paragraph()  # spacer
@@ -1107,20 +1108,47 @@ def build_faceid_template(path: Path = FACEID_TEMPLATE_PATH) -> Path:
     return path
 
 
+PHOTO_PLACEHOLDER = "[ AFFIX RECENT PHOTOGRAPH OF THE ACCUSED HERE ]"
+
+
 def render_faceid(context: dict, template_path: Path = FACEID_TEMPLATE_PATH) -> DocxTemplate:
-    """Render the Face Identification Form template with ``context``."""
+    """Render the Face Identification Form. If the context carries a
+    ``_photo_path`` to a real image, embed it (InlineImage); otherwise fall back
+    to the placeholder text."""
+    import os
+
+    from docx.shared import Mm
+    from docxtpl import InlineImage
+
     tpl = DocxTemplate(str(template_path))
+    photo_path = context.pop("_photo_path", None)
+    if photo_path and os.path.exists(photo_path):
+        context["photo"] = InlineImage(tpl, photo_path, width=Mm(40))
+    else:
+        context["photo"] = PHOTO_PLACEHOLDER
     tpl.render(context)
     return tpl
 
 
 def build_faceid_context_from_case(case) -> dict:
-    """Map a Case (+ accused) to the Face Identification Form context."""
+    """Map a Case (+ accused) to the Face Identification Form context.
+
+    ``_photo_path`` is the accused's photo file path (if any); render_faceid turns
+    it into an embedded image or the placeholder.
+    """
     accused = resolve_seized_from_person(case)  # accused, else seized-from party
     officer = case.io
 
+    photo_path = None
+    if accused and accused.photo:
+        try:
+            photo_path = accused.photo.path
+        except (ValueError, NotImplementedError):
+            photo_path = None
+
     return {
         "today": timezone.localdate().strftime("%d-%m-%Y"),
+        "_photo_path": photo_path,
         "case": {
             "case_number": case.case_number,
             "fir_number": case.fir_number,

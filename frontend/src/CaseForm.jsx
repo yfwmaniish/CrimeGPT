@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { createCase, addDiaryEvent, ApiError } from "./api";
+import { createCase, addDiaryEvent, uploadPartyPhoto, ApiError } from "./api";
 
 const STATUSES = ["COMPLAINT", "INVESTIGATION", "ARREST", "CHARGESHEET"];
 const ROLES = ["VICTIM", "ACCUSED", "WITNESS"];
@@ -15,6 +15,7 @@ const emptyParty = () => ({
   gender: "",
   phone: "",
   address: "",
+  photoFile: null, // transient — uploaded after the case is created
 });
 const emptyItem = () => ({ description: "", quantity: "", seized_from_index: "", seizure_date: "", seizure_place: "" });
 
@@ -93,6 +94,20 @@ export default function CaseForm({ user, onCreated, onCancel }) {
           });
         } catch {
           /* non-fatal: the case is created; arrest detail can be added via the diary */
+        }
+      }
+
+      // Upload accused photos (Face ID). Matched to the saved party by name+role.
+      for (const p of parties) {
+        if (p.role === "ACCUSED" && p.photoFile && created.parties) {
+          const match = created.parties.find((cp) => cp.role === "ACCUSED" && cp.name === p.name);
+          if (match) {
+            try {
+              await uploadPartyPhoto(created.id, match.id, p.photoFile);
+            } catch {
+              /* non-fatal: photo can be added later */
+            }
+          }
         }
       }
 
@@ -216,6 +231,16 @@ export default function CaseForm({ user, onCreated, onCancel }) {
                 value={p.address}
                 onChange={(e) => updateParty(i, "address", e.target.value)}
               />
+              {p.role === "ACCUSED" && (
+                <label className="person-photo">
+                  {t("form.photo")}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => updateParty(i, "photoFile", e.target.files?.[0] || null)}
+                  />
+                </label>
+              )}
             </div>
           </div>
         ))}

@@ -26,9 +26,34 @@ replacing ``parties`` cascades to its dependents, send ``parties``,
 ``seized_items`` and ``statements`` together when you change parties.
 """
 from django.db import transaction
+from PIL import Image
 from rest_framework import serializers
 
-from .models import Case, DiaryEvent, Party, SeizedItem, Statement, User
+from .models import Case, DiaryEvent, EvidenceImage, Party, SeizedItem, Statement, User
+
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "GIF", "WEBP", "BMP"}
+
+
+def validate_image_file(f):
+    """Reject non-images, oversized files, and uncommon formats (Pillow)."""
+    if f.size > MAX_IMAGE_BYTES:
+        raise serializers.ValidationError("Image must be 5 MB or smaller.")
+    try:
+        img = Image.open(f)
+        fmt = (img.format or "").upper()
+        img.verify()  # checks the file is a valid, non-corrupt image
+    except serializers.ValidationError:
+        raise
+    except Exception:
+        raise serializers.ValidationError("File is not a valid image.")
+    finally:
+        f.seek(0)
+    if fmt not in ALLOWED_IMAGE_FORMATS:
+        raise serializers.ValidationError(
+            f"Unsupported image format ({fmt or 'unknown'}). Use JPEG, PNG, GIF, WEBP or BMP."
+        )
+    return f
 
 
 class PartySerializer(serializers.ModelSerializer):
@@ -209,3 +234,25 @@ class DiaryEventSerializer(serializers.ModelSerializer):
 
     def get_actor(self, obj):
         return obj.actor.username if obj.actor else None
+
+
+class EvidenceImageSerializer(serializers.ModelSerializer):
+    """Evidence image with caption + comma-separated tags. uploaded_by/at are
+    set server-side; the image is validated for size and format."""
+
+    uploaded_by = serializers.SerializerMethodField()
+    tag_list = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EvidenceImage
+        fields = ["id", "case", "image", "description", "tags", "tag_list", "uploaded_by", "uploaded_at"]
+        read_only_fields = ["uploaded_at"]
+
+    def get_uploaded_by(self, obj):
+        return obj.uploaded_by.username if obj.uploaded_by else None
+
+    def get_tag_list(self, obj):
+        return obj.tag_list()
+
+    def validate_image(self, value):
+        return validate_image_file(value)

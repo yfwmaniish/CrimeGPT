@@ -225,6 +225,21 @@ auto-confirmed, re-running never duplicates or un-confirms existing rows, and no
 unconfirmed section is ever written into a document. Officer confirmation is a
 separate explicit action.
 
+## Evidence images & accused photo (Phase 3)
+
+- **Accused photo** — `Party.photo`. On the case form, each accused row has a
+  "Photo (optional)" input; the photo is uploaded after the case is saved via
+  `POST /api/cases/{id}/parties/{party_id}/photo/` (IO/SHO). The **Face
+  Identification Form** then embeds the actual photo (docxtpl `InlineImage`),
+  falling back to the "affix photograph" placeholder box when none exists.
+- **Evidence images** — `EvidenceImage` (image + caption + comma-separated tags).
+  CRUD at `/api/evidence/` (filter with `?case=<id>&tag=<tag>`); **IO/SHO add or
+  delete, all roles view**. Each upload auto-logs an `EVIDENCE_UPLOADED` diary
+  event. The case view has an **Evidence** panel (upload + thumbnails with
+  captions/tags + tag filter).
+- **Validation** (Pillow): images must be ≤ 5 MB and JPEG/PNG/GIF/WEBP/BMP.
+- Uploads are served from `MEDIA_URL` in dev (same as generated documents).
+
 ## Case diary timeline (Week 2, Track D)
 
 ```

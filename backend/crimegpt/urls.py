@@ -10,7 +10,7 @@ from django.http import JsonResponse
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from core.views import CaseViewSet, LoginView, MeView
+from core.views import CaseViewSet, EvidenceImageViewSet, LoginView, MeView
 
 
 def health(_request):
@@ -19,6 +19,7 @@ def health(_request):
 
 router = DefaultRouter()
 router.register(r"cases", CaseViewSet, basename="case")
+router.register(r"evidence", EvidenceImageViewSet, basename="evidence")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

@@ -10,6 +10,7 @@ from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import (
     SAFE_METHODS,
     AllowAny,
@@ -42,11 +43,18 @@ from .models import (
     CaseSection,
     DiaryEvent,
     Document,
+    EvidenceImage,
     LandmarkJudgment,
     LegalSection,
+    Party,
 )
 from .pdf import convert_docx_to_pdf
-from .serializers import CaseSerializer, DiaryEventSerializer
+from .serializers import (
+    CaseSerializer,
+    DiaryEventSerializer,
+    EvidenceImageSerializer,
+    validate_image_file,
+)
 
 
 def _user_payload(user):
@@ -586,3 +594,74 @@ class CaseViewSet(viewsets.ModelViewSet):
         case_judgment.applied = bool(request.data.get("applied", True))
         case_judgment.save(update_fields=["applied"])
         return Response(self._judgment_dict(judgment, case_judgment.applied))
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path=r"parties/(?P<party_id>[^/.]+)/photo",
+        url_name="party-photo",
+        permission_classes=[IsAuthenticated, CanGenerateDocuments],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def party_photo(self, request, pk=None, party_id=None):
+        """Upload a photo for a party (used by the Face Identification Form).
+        Multipart field name: ``photo``. IO/SHO only."""
+        case = self.get_object()
+        try:
+            party = case.parties.get(id=party_id)
+        except Party.DoesNotExist:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        upload = request.FILES.get("photo")
+        if not upload:
+            return Response({"detail": "No photo file provided."}, status=status.HTTP_400_BAD_REQUEST)
+        validate_image_file(upload)  # raises 400 on bad size/format
+        party.photo = upload
+        party.save(update_fields=["photo"])
+        return Response({"id": party.id, "photo": request.build_absolute_uri(party.photo.url)})
+
+
+class CanManageEvidence(BasePermission):
+    """Any authenticated user may view evidence; only IO/SHO may add or delete."""
+
+    message = "Only Investigating Officers (IO) and Station House Officers (SHO) may add or remove evidence."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return getattr(user, "role", "") in ("IO", "SHO")
+
+
+class EvidenceImageViewSet(viewsets.ModelViewSet):
+    """CRUD for evidence images. Filter the list with ?case=<id> and ?tag=<tag>.
+    Adding an image auto-logs an EVIDENCE_UPLOADED diary event."""
+
+    serializer_class = EvidenceImageSerializer
+    permission_classes = [CanManageEvidence]
+    parser_classes = [MultiPartParser, FormParser]
+    queryset = EvidenceImage.objects.select_related("uploaded_by", "case").all()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        case_id = self.request.query_params.get("case")
+        if case_id:
+            qs = qs.filter(case_id=case_id)
+        tag = self.request.query_params.get("tag")
+        if tag:
+            qs = qs.filter(tags__icontains=tag.strip())
+        return qs
+
+    def perform_create(self, serializer):
+        evidence = serializer.save(uploaded_by=self.request.user)
+        caption = evidence.description or "image"
+        tags = f" [{evidence.tags}]" if evidence.tags else ""
+        DiaryEvent.objects.create(
+            case=evidence.case,
+            timestamp=timezone.now(),
+            event_type="EVIDENCE_UPLOADED",
+            description=f"Evidence uploaded: {caption}{tags}",
+            actor=self.request.user,
+        )

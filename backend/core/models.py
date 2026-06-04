@@ -81,6 +81,7 @@ class Party(models.Model):
     phone = models.CharField(max_length=20, blank=True)
     id_type = models.CharField(max_length=50, blank=True)  # Aadhaar / etc.
     id_number = models.CharField(max_length=100, blank=True)
+    photo = models.ImageField(upload_to="party_photos/", null=True, blank=True)  # used in Face ID
     history = HistoricalRecords()
 
     class Meta:
@@ -254,3 +255,25 @@ class Document(models.Model):
 
     def __str__(self):
         return f"{self.get_doc_type_display()} v{self.version} (case {self.case_id})"
+
+
+class EvidenceImage(models.Model):
+    """An evidence photograph attached to a case, with a caption and free tags."""
+
+    case = models.ForeignKey(Case, related_name="evidence_images", on_delete=models.CASCADE)
+    image = models.ImageField(upload_to="evidence/")
+    description = models.CharField(max_length=300, blank=True)  # short caption
+    tags = models.CharField(max_length=255, blank=True)  # comma-separated, e.g. "weapon, recovered"
+    uploaded_by = models.ForeignKey(
+        "core.User", null=True, blank=True, on_delete=models.SET_NULL
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-uploaded_at"]
+
+    def tag_list(self):
+        return [t.strip() for t in self.tags.split(",") if t.strip()]
+
+    def __str__(self):
+        return f"Evidence {self.id} (case {self.case_id})"

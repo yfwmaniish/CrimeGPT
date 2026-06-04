@@ -1701,3 +1701,142 @@ class LandmarkJudgmentTests(APITestCase):
         self.assertIn("AIR 1963 SC 1094", text)        # applied -> present
         self.assertNotIn("AIR 1958 SC 465", text)      # not applied -> absent
         self.assertNotIn("{{", text)
+
+
+def _png_bytes(color=(200, 30, 30), size=(16, 16)):
+    from io import BytesIO
+    from PIL import Image
+    buf = BytesIO()
+    Image.new("RGB", size, color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class PartyPhotoFaceIdTests(TestCase):
+    """Phase 3: a Party photo flows into the Face Identification Form render."""
+
+    def test_photo_embeds_in_faceid_else_placeholder(self):
+        from io import BytesIO
+        from django.core.files.base import ContentFile
+        from docx import Document as Docx
+        from core.documents import build_faceid_context_from_case, render_faceid, PHOTO_PLACEHOLDER
+
+        io = User.objects.create_user(username="io_ph", password="pw", role="IO")
+        case = Case.objects.create(case_number="PH-1", fir_number="F", fir_date="2026-06-01",
+                                   police_station="PS", incident_narrative="x", io=io)
+        accused = Party.objects.create(case=case, role="ACCUSED", name="Imran", address="x")
+
+        # No photo yet -> placeholder text in the box.
+        tpl = render_faceid(build_faceid_context_from_case(case))
+        buf = BytesIO(); tpl.save(buf); buf.seek(0)
+        doc = Docx(buf)
+        text = "\n".join(c.text for tb in doc.tables for r in tb.rows for c in r.cells)
+        self.assertIn("AFFIX RECENT PHOTOGRAPH", text)
+        self.assertEqual(len(doc.inline_shapes), 0)
+
+        # With a photo -> embedded image, no placeholder.
+        accused.photo.save("imran.png", ContentFile(_png_bytes()), save=True)
+        tpl2 = render_faceid(build_faceid_context_from_case(case))
+        buf2 = BytesIO(); tpl2.save(buf2); buf2.seek(0)
+        doc2 = Docx(buf2)
+        text2 = "\n".join(c.text for tb in doc2.tables for r in tb.rows for c in r.cells)
+        self.assertNotIn("AFFIX RECENT PHOTOGRAPH", text2)
+        self.assertGreaterEqual(len(doc2.inline_shapes), 1)  # photo embedded
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class EvidenceImageTests(APITestCase):
+    """Phase 3: evidence image CRUD, RBAC, tag filter, diary log, validation."""
+
+    def setUp(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.SUF = SimpleUploadedFile
+        self.io = User.objects.create_user(username="io_ev", password="pw", role="IO")
+        self.legal = User.objects.create_user(username="legal_ev", password="pw", role="LEGAL")
+        self.case = Case.objects.create(case_number="EV-1", fir_number="F", fir_date="2026-06-01",
+                                        police_station="PS", incident_narrative="x", io=self.io)
+        self.list_url = reverse("evidence-list")
+
+    def _upload(self, description="Knife", tags="weapon, recovered", name="e.png"):
+        return self.client.post(self.list_url, {
+            "case": self.case.id,
+            "image": self.SUF(name, _png_bytes(), content_type="image/png"),
+            "description": description, "tags": tags,
+        }, format="multipart")
+
+    def test_io_can_upload_and_diary_logged(self):
+        self.client.force_authenticate(self.io)
+        resp = self._upload()
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED, resp.data)
+        self.assertEqual(resp.data["uploaded_by"], "io_ev")
+        self.assertEqual(resp.data["tag_list"], ["weapon", "recovered"])
+        self.assertTrue(resp.data["image"])
+        # diary event appended
+        ev = self.case.diary.filter(event_type="EVIDENCE_UPLOADED")
+        self.assertEqual(ev.count(), 1)
+        self.assertEqual(ev.first().actor, self.io)
+
+    def test_legal_can_view_but_not_upload_or_delete(self):
+        self.client.force_authenticate(self.io)
+        created = self._upload()
+        ev_id = created.data["id"]
+        self.client.force_authenticate(self.legal)
+        # view ok
+        self.assertEqual(self.client.get(self.list_url + f"?case={self.case.id}").status_code, status.HTTP_200_OK)
+        # upload forbidden
+        self.assertEqual(self._upload().status_code, status.HTTP_403_FORBIDDEN)
+        # delete forbidden
+        self.assertEqual(self.client.delete(reverse("evidence-detail", args=[ev_id])).status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_tag_filter(self):
+        self.client.force_authenticate(self.io)
+        self._upload(description="Knife", tags="weapon, recovered")
+        self._upload(description="Letter", tags="document")
+        weapon = self.client.get(self.list_url + f"?case={self.case.id}&tag=weapon").data["results"]
+        descs = {e["description"] for e in weapon}
+        self.assertEqual(descs, {"Knife"})
+
+    def test_rejects_non_image(self):
+        self.client.force_authenticate(self.io)
+        bad = self.client.post(self.list_url, {
+            "case": self.case.id,
+            "image": self.SUF("note.txt", b"this is not an image", content_type="text/plain"),
+            "description": "bad",
+        }, format="multipart")
+        self.assertEqual(bad.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_rejects_oversized(self):
+        self.client.force_authenticate(self.io)
+        big = self.client.post(self.list_url, {
+            "case": self.case.id,
+            "image": self.SUF("big.png", b"x" * (5 * 1024 * 1024 + 10), content_type="image/png"),
+            "description": "too big",
+        }, format="multipart")
+        self.assertEqual(big.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+@override_settings(MEDIA_ROOT=_TEST_MEDIA)
+class PartyPhotoEndpointTests(APITestCase):
+    """Phase 3: the party-photo upload endpoint (IO/SHO only)."""
+
+    def setUp(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        self.SUF = SimpleUploadedFile
+        self.io = User.objects.create_user(username="io_pp", password="pw", role="IO")
+        self.legal = User.objects.create_user(username="legal_pp", password="pw", role="LEGAL")
+        self.case = Case.objects.create(case_number="PP-1", fir_number="F", fir_date="2026-06-01",
+                                        police_station="PS", incident_narrative="x", io=self.io)
+        self.accused = Party.objects.create(case=self.case, role="ACCUSED", name="Imran", address="x")
+        self.url = reverse("case-party-photo", args=[self.case.id, self.accused.id])
+
+    def test_io_uploads_party_photo(self):
+        self.client.force_authenticate(self.io)
+        resp = self.client.post(self.url, {"photo": self.SUF("p.png", _png_bytes(), content_type="image/png")}, format="multipart")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK, resp.data)
+        self.accused.refresh_from_db()
+        self.assertTrue(self.accused.photo)
+
+    def test_legal_forbidden(self):
+        self.client.force_authenticate(self.legal)
+        resp = self.client.post(self.url, {"photo": self.SUF("p.png", _png_bytes(), content_type="image/png")}, format="multipart")
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)

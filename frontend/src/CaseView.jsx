@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import Sections from "./Sections";
 import Judgments from "./Judgments";
 import Documents from "./Documents";
+import Evidence from "./Evidence";
 import Diary from "./Diary";
 
 // The working view for a single case — used both right after creating a case and
@@ -35,6 +36,8 @@ export default function CaseView({ caseData, user, justCreated = false, onBack }
         user={user}
         onGenerated={() => setDiaryRefresh((n) => n + 1)}
       />
+
+      <Evidence caseId={caseData.id} user={user} />
 
       <Diary caseId={caseData.id} user={user} refreshSignal={diaryRefresh} />
 

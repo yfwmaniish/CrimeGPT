@@ -62,7 +62,22 @@
     "placeOfSeizure": "Place of seizure",
     "fixErrors": "Please fix the following:",
     "save": "Save case",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "photo": "Photo (optional)"
+  },
+  "evidence": {
+    "title": "Evidence",
+    "hint": "Upload photographs of evidence with a short caption and tags (e.g. weapon, recovered). Filter by tag below.",
+    "upload": "Upload",
+    "uploading": "Uploading…",
+    "description": "Caption (e.g. knife recovered at scene)",
+    "tags": "Tags (comma-separated, e.g. weapon, recovered)",
+    "tagFilter": "Filter by tag…",
+    "none": "No evidence uploaded yet.",
+    "delete": "Delete",
+    "pickFile": "Choose an image to upload.",
+    "onlyOfficer": "Only an IO or SHO can manage evidence.",
+    "cantManage": "Your role ({{role}}) can view evidence but not add or delete it."
   },
   "statuses": {
     "COMPLAINT": "Complaint",
