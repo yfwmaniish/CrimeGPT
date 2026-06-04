@@ -2,7 +2,51 @@
 
 Investigation case-management system for police workflows. One canonical `Case`
 object; every legal document is a template view over it (no data entered twice).
-See [WEEK1_PLAN.md](WEEK1_PLAN.md) for the build plan and schema spec.
+See [WEEK1_PLAN.md](WEEK1_PLAN.md) and [WEEK2_PLAN.md](WEEK2_PLAN.md) for the build
+plans and schema spec.
+
+**Evaluating this project?** Start with [the setup below](#setup--from-a-fresh-clone-to-a-populated-demo)
+(one ordered run takes you from `git clone` to three seeded demo cases), then see
+[DEMO_SCRIPT.md](DEMO_SCRIPT.md) for a 7-minute guided walkthrough and
+[USER_GUIDE.md](USER_GUIDE.md) for officer-facing usage. The seeded cases are
+built from the fictional FIRs in
+[backend/data/sample_firs.md](backend/data/sample_firs.md).
+
+## Architecture & Design Principles
+
+Four principles run through the whole system; the demo is built to surface each.
+
+**One canonical Case, documents are views over it.** Every fact — parties, seized
+items, narrative, sections, judgments — is entered once on the `Case`. The seven
+legal documents are templates rendered from that single pool, so nothing is ever
+typed twice and a correction in one place propagates everywhere.
+
+**AI suggests, the officer decides.** Section retrieval and judgment retrieval are
+both *suggestions only*. The AI ranks BNS sections from the incident narrative and
+proposes relevant case law, but nothing is acted on until an officer explicitly
+**confirms** a section or **applies** a judgment. Only confirmed sections and
+applied judgments are ever written into a document — the machine never puts words
+in the officer's mouth.
+
+**The case diary is append-only; documents are versioned.** The diary is a
+chronological log that is added to, never edited or deleted, so the investigation
+has an honest audit trail. Likewise, regenerating a document never overwrites the
+previous file — each generation is a new immutable version (v1, v2, …).
+
+**Legal text is verbatim from authoritative sources, never generated.** BNS/BNSS/BSA
+section text comes verbatim from India Code; landmark judgments are hand-curated
+from authoritative reports with verified citations. The AI is used only to *find*
+relevant material by similarity — it never writes or paraphrases the law itself.
+
+**Honest caveats (please read before judging completeness):**
+
+- **Hindi / Gujarati UI and document labels are a working draft pending native
+  review.** They round-trip correctly and demonstrate the i18n pattern, but the
+  wording has not yet been signed off by a native legal-language reviewer.
+- **Judgment *summaries* are paraphrased plain-language explanations** written to
+  help an officer understand a holding quickly. The **citations and one-line
+  principles are verified** against authoritative sources; the prose summaries are
+  not verbatim quotations and should be read as explanatory, not quotable.
 
 ## Stack
 
@@ -28,47 +72,73 @@ See [WEEK1_PLAN.md](WEEK1_PLAN.md) for the build plan and schema spec.
 └── .env.example        copy to .env
 ```
 
-## Quick start (Docker)
+## Setup — from a fresh clone to a populated demo
 
-1. Start **Docker Desktop**.
-2. Copy env defaults:
-   ```sh
-   cp .env.example .env
-   ```
-3. Bring up the stack (builds the image, starts Postgres, runs migrations):
-   ```sh
-   docker compose up --build
-   ```
-   - API + admin: http://localhost:8000/admin/
-   - Health check: http://localhost:8000/api/health/
-4. Create an admin user (in another terminal):
-   ```sh
-   docker compose exec web python manage.py createsuperuser
-   ```
+This is the full, ordered sequence. Run it top to bottom and you'll end with the
+stack running and **three realistic demo cases** already seeded (built from the
+fictional FIRs in [backend/data/sample_firs.md](backend/data/sample_firs.md)), so
+the app opens on a populated "My cases" page. Every loader/seeder is idempotent —
+safe to re-run.
 
-## Frontend — the Week 1 flow (Day 5)
+**1. Prerequisites:** Docker Desktop, plus Node 18+ and npm for the frontend.
 
-The React app (Vite) implements the full vertical slice: **sign in → create a
-case with parties and seized items → Generate Seizure Receipt → download it**,
-with the returned version number and the new diary entry shown on screen.
+**2. Bring up the backend** (builds the image, starts Postgres, runs migrations):
 
 ```sh
-# 1. Create demo accounts (once):
+cp .env.example .env
+docker compose up --build -d
+```
+- API + admin: http://localhost:8000/admin/  ·  health check: http://localhost:8000/api/health/
+- Wait until migrations finish (`docker compose logs -f web` shows the server is up).
+
+**3. Seed accounts, legal data, and demo cases** (one block, in this order):
+
+```sh
+# Demo login accounts (io / sho / legal):
 docker compose exec web python manage.py seed_demo_users
-# 2. Run the frontend:
+
+# Legal reference data — all three new criminal codes, then embed for retrieval:
+docker compose exec web python manage.py load_legal_sections data/bns_sections.csv
+docker compose exec web python manage.py load_legal_sections data/bnss_sections.csv
+docker compose exec web python manage.py load_legal_sections data/bsa_sections.csv
+docker compose exec web python manage.py embed_legal_sections
+
+# Landmark judgments / case law, then embed:
+docker compose exec web python manage.py load_landmark_judgments data/landmark_judgments.csv
+docker compose exec web python manage.py embed_landmark_judgments
+
+# Three fully-populated demo cases (parties, seized items, confirmed sections,
+# applied judgments, an arrest event, and a generated Seizure Receipt each):
+docker compose exec web python manage.py seed_demo_cases
+```
+
+> The two `embed_*` commands load the local `all-MiniLM-L6-v2` model and may take
+> a minute or two the first time. `seed_demo_cases` depends on the loaders +
+> embedders above having run.
+
+**4. Run the frontend:**
+
+```sh
 cd frontend
 cp .env.example .env.local   # optional; defaults to http://localhost:8000
 npm install
 npm run dev                  # http://localhost:5173
 ```
 
-Open http://localhost:5173 and sign in with a demo account:
+**5. Open the app** at http://localhost:5173 and sign in with a demo account:
 
-| Username | Password   | Role | Can generate documents? |
-|----------|------------|------|--------------------------|
-| `io`     | `io12345`  | Investigating Officer | ✅ |
-| `sho`    | `sho12345` | Station House Officer  | ✅ |
-| `legal`  | `legal12345` | Legal Advisor        | ❌ (shows the clean 403 message) |
+| Username | Password     | Role | Can generate documents? |
+|----------|--------------|------|--------------------------|
+| `io`     | `io12345`    | Investigating Officer | ✅ |
+| `sho`    | `sho12345`   | Station House Officer  | ✅ |
+| `legal`  | `legal12345` | Legal Advisor          | ❌ (shows the clean 403 message) |
+
+Signed in as `io`, you'll see the three seeded cases. Open **CR-118/2026** to see
+confirmed BNS sections, an applied judgment, a generated Seizure Receipt under
+Documents, and an arrest event in the case diary. For a guided tour, follow
+[DEMO_SCRIPT.md](DEMO_SCRIPT.md); for day-to-day usage, see
+[USER_GUIDE.md](USER_GUIDE.md). An admin superuser (for the Django admin) is
+optional: `docker compose exec web python manage.py createsuperuser`.
 
 **Auth:** the SPA uses DRF **token auth** — `POST /api/auth/login/` returns a
 token stored in `localStorage` and sent as `Authorization: Token …`. This avoids
@@ -134,7 +204,7 @@ shared `_finalize_document`: versioned, IO/SHO-only, logs a `DiaryEvent`).
 | `POST /api/cases/{id}/documents/custody/`     | Court Custody Letter | accused + **confirmed** sections |
 | `POST /api/cases/{id}/documents/medical/`     | Medical Treatment    | victim → accused → blank + incident |
 | `POST /api/cases/{id}/documents/panchanama/`  | Accused Panchanama   | accused + witnesses + seized items |
-| `POST /api/cases/{id}/documents/faceid/`      | Face Identification  | accused + photo placeholder box (see TODO) |
+| `POST /api/cases/{id}/documents/faceid/`      | Face Identification  | accused + embedded accused photo (placeholder box if none) |
 | `POST /api/cases/{id}/documents/chargesheet/` | Purvani Chargesheet  | everything (the superset) |
 
 Only **confirmed** `CaseSection`s ever reach a document. Word templates are built
@@ -257,8 +327,10 @@ RBAC as document generation), while anyone signed in can view.
 
 Hand-curated landmark Indian judgments (`backend/data/landmark_judgments.csv`),
 each with a verified citation, plain-language summary, one-line principle, links
-to the BNS sections it relates to, and a `source`. **Verbatim/curated only** —
-citations and holdings come from authoritative sources, never generated.
+to the BNS sections it relates to, and a `source`. **Citations and one-line
+principles are verified** against authoritative sources; the **summaries are
+paraphrased plain-language explanations** (not verbatim quotations). The AI only
+*finds* relevant judgments by similarity — it never writes the law.
 
 ```sh
 docker compose exec web python manage.py load_landmark_judgments data/landmark_judgments.csv
@@ -285,6 +357,8 @@ curated/verified and easy to extend (add rows to the CSV, reload, re-embed).
 - **Input** is stored verbatim in UTF-8 — names, addresses, and narratives typed
   in Devanagari or Gujarati round-trip with no transliteration (test:
   `MultilingualTests.test_devanagari_and_gujarati_input_round_trips`).
+- **Caveat:** the Hindi/Gujarati UI strings and document labels are a working
+  draft pending native-reviewer sign-off (see the design-principles caveats above).
 - **Documents (proof-of-concept):** the **Seizure Receipt** has translated
   templates (`seizure_receipt_hi.docx`, `seizure_receipt_gu.docx`). Pass
   `?lang=en|hi|gu` to its generation endpoint to pick one (default `en`); the UI
@@ -314,8 +388,9 @@ so regenerate it rather than hand-editing:
 docker compose exec web python manage.py build_doc_templates
 ```
 
-`render_seizure_receipt(context)` fills it via docxtpl. The Day 4 API endpoint
-will feed it real Case data; `sample_seizure_context()` provides demo data today.
+`render_seizure_receipt(context)` fills it via docxtpl. The generation endpoint
+feeds it real Case data via `build_seizure_context_from_case(case)`;
+`sample_seizure_context()` provides standalone demo data for template tests.
 
 ## Useful commands
 
