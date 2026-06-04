@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getJudgments, suggestJudgments, applyJudgment, ApiError } from "./api";
+import { qualityKey } from "./quality";
 
 export default function Judgments({ caseId, user }) {
   const { t } = useTranslation();
@@ -32,7 +33,8 @@ export default function Judgments({ caseId, user }) {
     setSuggesting(true);
     try {
       const data = await suggestJudgments(caseId, 5);
-      merge(data.results);
+      // Relative quality badge from rank in this query's returned list.
+      merge(data.results.map((r, idx) => ({ ...r, quality: qualityKey(idx, data.results.length) })));
     } catch (err) {
       setError(err instanceof ApiError && err.status === 400
         ? t("sections.needNarrative")
@@ -90,6 +92,9 @@ export default function Judgments({ caseId, user }) {
               </label>
               <div className="judgment-main">
                 <div className="judgment-head">
+                  {j.quality && (
+                    <span className={`quality quality-${j.quality}`}>{t(`quality.${j.quality}`)}</span>
+                  )}
                   <strong>{j.title}</strong>
                   <span className="tag">{j.citation}</span>
                   {typeof j.similarity === "number" && (

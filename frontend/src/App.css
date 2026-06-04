@@ -417,3 +417,15 @@ code {
 .evidence-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem; }
 .evidence-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; margin-top: 0.25rem; }
 .evidence-del { color: #b42318; font-size: 0.8rem; }
+
+/* Relative quality badges (presentation-only) */
+.quality {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.quality-high { background: #d6f5e0; color: #1f7a44; }
+.quality-medium { background: #fdeecb; color: #92610a; }
+.quality-lower { background: #eef0f3; color: #5b6470; }

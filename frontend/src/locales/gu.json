@@ -2,6 +2,7 @@
   "brand": "CrimeGPT",
   "tagline": "કેસ વ્યવસ્થાપન",
   "lang": { "label": "ભાષા" },
+  "quality": { "high": "ઊંચું મેળ", "medium": "મધ્યમ મેળ", "lower": "નીચું મેળ" },
   "common": {
     "loading": "લોડ થઈ રહ્યું છે…",
     "signOut": "સાઇન આઉટ",

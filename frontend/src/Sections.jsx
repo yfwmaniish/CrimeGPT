@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { suggestSections, confirmSection, ApiError } from "./api";
+import { qualityKey } from "./quality";
 
 export default function Sections({ caseId, user }) {
   const { t } = useTranslation();
@@ -65,7 +66,9 @@ export default function Sections({ caseId, user }) {
 
       {results && results.length > 0 && (
         <ul className="section-list">
-          {results.map((r) => (
+          {results.map((r, idx) => {
+            const quality = qualityKey(idx, results.length);
+            return (
             <li key={r.case_section_id} className={r.confirmed ? "section-row confirmed" : "section-row"}>
               <label className="section-confirm">
                 <input
@@ -78,6 +81,7 @@ export default function Sections({ caseId, user }) {
               <div className="section-main">
                 <div className="section-head">
                   <span className="tag">{r.code} {r.section_number}</span>
+                  <span className={`quality quality-${quality}`}>{t(`quality.${quality}`)}</span>
                   <strong>{r.title}</strong>
                   {r.confirmed && <span className="good"> {t("sections.confirmed")}</span>}
                 </div>
@@ -90,7 +94,8 @@ export default function Sections({ caseId, user }) {
                 <span style={{ width: `${Math.max(5, Math.round(r.similarity * 100))}%` }} />
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
 

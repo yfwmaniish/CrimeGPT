@@ -2,6 +2,7 @@
   "brand": "CrimeGPT",
   "tagline": "केस प्रबंधन",
   "lang": { "label": "भाषा" },
+  "quality": { "high": "उच्च मिलान", "medium": "मध्यम मिलान", "lower": "निम्न मिलान" },
   "common": {
     "loading": "लोड हो रहा है…",
     "signOut": "साइन आउट",
